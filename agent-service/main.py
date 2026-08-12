@@ -1,18 +1,29 @@
-import uuid
 import os
+import uuid
 from typing import Optional, Union
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from langgraph.types import Command
-from dotenv import load_dotenv
 
-# Load env variables
+# Load environment variables
 load_dotenv()
 
+# Import your LangGraph agent
 from graph import trip_graph, check_and_update_trip_call_status
+from llm_extract import analyze_user_prompt
 
-app = FastAPI(title="Tripset AI agent-service")
 
+app = FastAPI(
+    title="Tripset AI Agent Service",
+    version="1.0.0",
+)
+
+
+# ============================================================
+# Request Models
+# ============================================================
 
 class CreateTripRequest(BaseModel):
     rawRequest: str
@@ -29,22 +40,61 @@ class DecisionRequest(BaseModel):
     note: Optional[str] = None
 
 
-from llm_extract import analyze_user_prompt
+# ============================================================
+# Health Check
+# ============================================================
+
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "service": "Tripset AI Agent Service",
+    }
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy",
+        "service": "tripset-agent",
+    }
+
+
+# ============================================================
+# Create Trip
+# ============================================================
 
 @app.post("/trips")
 async def create_trip(payload: CreateTripRequest):
-    # Check if the user request is just general chat or a planning request
-    analysis = analyze_user_prompt(payload.rawRequest, payload.history)
+    # Check whether the request is general chat
+    # or an actual trip-planning request.
+    analysis = analyze_user_prompt(
+        payload.rawRequest,
+        payload.history,
+    )
+
+    # General conversation
     if not analysis.get("is_planning_request"):
         return {
             "tripId": None,
             "status": "chat",
-            "chatResponse": analysis.get("chat_response", "Greetings! How can I help you plan a trip today?")
+            "chatResponse": analysis.get(
+                "chat_response",
+                "Greetings! How can I help you plan a trip today?",
+            ),
         }
 
+    # Create unique trip ID
     trip_id = str(uuid.uuid4())
-    config = {"configurable": {"thread_id": trip_id}}
 
+    # LangGraph thread configuration
+    config = {
+        "configurable": {
+            "thread_id": trip_id
+        }
+    }
+
+    # Start trip graph
     result = await trip_graph.ainvoke(
         {
             "trip_id": trip_id,
@@ -61,36 +111,131 @@ async def create_trip(payload: CreateTripRequest):
         },
         config,
     )
-    return {"tripId": trip_id, "status": "awaiting_hotel_selection", **result}
 
+    return {
+        "tripId": trip_id,
+        "status": "awaiting_hotel_selection",
+        **result,
+    }
+
+
+# ============================================================
+# Get Trip
+# ============================================================
 
 @app.get("/trips/{trip_id}")
 async def get_trip(trip_id: str):
-    config = {"configurable": {"thread_id": trip_id}}
+    config = {
+        "configurable": {
+            "thread_id": trip_id
+        }
+    }
+
     state = trip_graph.get_state(config)
+
     if not state.values:
-        raise HTTPException(status_code=404, detail="trip not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Trip not found",
+        )
+
     values = dict(state.values)
-    values = check_and_update_trip_call_status(trip_id, values)
+
+    values = check_and_update_trip_call_status(
+        trip_id,
+        values,
+    )
+
     return values
 
 
-@app.post("/trips/{trip_id}/approve-enquiry")
-async def approve_enquiry(trip_id: str, payload: ApproveEnquiryRequest):
-    config = {"configurable": {"thread_id": trip_id}}
-    result = await trip_graph.ainvoke(Command(resume=str(payload.hotelId)), config)
-    return {"status": "awaiting_call_decision", **result}
+# ============================================================
+# Approve Hotel Enquiry
+# ============================================================
 
+@app.post("/trips/{trip_id}/approve-enquiry")
+async def approve_enquiry(
+    trip_id: str,
+    payload: ApproveEnquiryRequest,
+):
+    config = {
+        "configurable": {
+            "thread_id": trip_id
+        }
+    }
+
+    result = await trip_graph.ainvoke(
+        Command(
+            resume=str(payload.hotelId)
+        ),
+        config,
+    )
+
+    return {
+        "status": "awaiting_call_decision",
+        **result,
+    }
+
+
+# ============================================================
+# Submit Decision
+# ============================================================
 
 @app.post("/trips/{trip_id}/decision")
-async def submit_decision(trip_id: str, payload: DecisionRequest):
-    config = {"configurable": {"thread_id": trip_id}}
+async def submit_decision(
+    trip_id: str,
+    payload: DecisionRequest,
+):
+    config = {
+        "configurable": {
+            "thread_id": trip_id
+        }
+    }
 
+    # Validate decision
+    if payload.decision not in ["proceed", "reject", "modify"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Decision must be proceed, reject, or modify",
+        )
+
+    # Modify trip
     if payload.decision == "modify":
-        trip_graph.update_state(config, {"pending_modification": payload.note})
-        result = await trip_graph.ainvoke(Command(resume=payload.decision, goto="rank_options"), config)
-        return {"status": "awaiting_hotel_selection", **result}
+        trip_graph.update_state(
+            config,
+            {
+                "pending_modification": payload.note
+            },
+        )
 
-    result = await trip_graph.ainvoke(Command(resume=payload.decision), config)
-    status = "ready_for_booking" if payload.decision == "proceed" else "closed"
-    return {"status": status, **result}
+        result = await trip_graph.ainvoke(
+            Command(
+                resume=payload.decision,
+                goto="rank_options",
+            ),
+            config,
+        )
+
+        return {
+            "status": "awaiting_hotel_selection",
+            **result,
+        }
+
+    # Proceed / Reject
+    result = await trip_graph.ainvoke(
+        Command(
+            resume=payload.decision
+        ),
+        config,
+    )
+
+    status = (
+        "ready_for_booking"
+        if payload.decision == "proceed"
+        else "closed"
+    )
+
+    return {
+        "status": status,
+        **result,
+    }
