@@ -1,0 +1,43 @@
+name: Deploy Agent Service to Azure Container Apps
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'agent-service/**'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to Azure Container Registry
+        uses: azure/docker-login@v2
+        with:
+          login-server: tripsetregistry.azurecr.io
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t tripsetregistry.azurecr.io/tripset-agent-service:${{ github.sha }} ./agent-service
+          docker build -t tripsetregistry.azurecr.io/tripset-agent-service:latest ./agent-service
+          docker push tripsetregistry.azurecr.io/tripset-agent-service:${{ github.sha }}
+          docker push tripsetregistry.azurecr.io/tripset-agent-service:latest
+
+      - name: Deploy Image to Azure Container App
+        run: |
+          az containerapp update \
+            --name tripset-agent-service \
+            --resource-group tripset-ai-rg \
+            --image tripsetregistry.azurecr.io/tripset-agent-service:${{ github.sha }}
