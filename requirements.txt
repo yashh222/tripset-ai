@@ -1,0 +1,2 @@
+--prefer-binary
+-r agent-service/requirements.txt
