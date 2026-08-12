@@ -105,8 +105,13 @@ export async function createTrip(req, res, next) {
         history
       }),
     });
-    if (data.status === "chat") {
-      return res.json(data);
+    if (data.status === "chat" || data.status === "error" || data.error) {
+      return res.json({
+        tripId: data.tripId || null,
+        status: data.status || (data.error ? "error" : "chat"),
+        chatResponse: data.chatResponse || data.error || "Our server is currently experiencing high load. Please try again in a few moments.",
+        error: data.error || null
+      });
     }
     const clientData = mapToClient(data);
     res.json({

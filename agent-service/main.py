@@ -124,6 +124,15 @@ async def create_trip(payload: CreateTripRequest):
         config,
     )
 
+    if result.get("error") or not result.get("ranked_hotels"):
+        err_msg = result.get("error") or "Our server is currently experiencing high load. Please try again in a few moments."
+        return {
+            "tripId": None,
+            "status": "error",
+            "error": err_msg,
+            "chatResponse": err_msg,
+        }
+
     return {
         "tripId": trip_id,
         "status": "awaiting_hotel_selection",

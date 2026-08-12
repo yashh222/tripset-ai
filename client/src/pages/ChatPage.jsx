@@ -278,11 +278,11 @@ export default function ChatPage() {
       }
 
       const result = await res.json()
-      if (result.status === "chat") {
+      if (result.status === "chat" || result.status === "error" || result.error) {
         const aiMsg = {
           id: Date.now() + "-ai",
           sender: "ai",
-          text: result.chatResponse
+          text: result.chatResponse || result.error || "Our server is currently experiencing high load. Please try again in a few moments."
         }
         setMessages((prev) => [...prev, aiMsg])
       } else {

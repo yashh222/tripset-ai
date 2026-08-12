@@ -34,6 +34,12 @@ async def research_crew_node(state: TripState):
 
 def rank_options(state: TripState):
     """This is the 'Budget Analyst' — pure arithmetic, no LLM."""
+    if state.get("error") or not state.get("hotel_candidates"):
+        return {
+            "ranked_hotels": [],
+            "error": state.get("error") or "Our server is currently experiencing high load. Please try again in a few moments."
+        }
+
     scored = []
     for h in state["hotel_candidates"]:
         raw = budget_calc_tool.run(
@@ -58,7 +64,9 @@ def rank_options(state: TripState):
 
 
 def present_options(state: TripState):
-    """Pauses here. Resumes when user selects a hotel_id."""
+    """Pauses here if hotels are present. If error, passes through cleanly."""
+    if state.get("error") or not state.get("ranked_hotels"):
+        return {}
     chosen_hotel_id = interrupt({"type": "select_hotel", "ranked_hotels": state["ranked_hotels"]})
     return {"selected_hotel_id": chosen_hotel_id, "enquiry_approved": True}
 

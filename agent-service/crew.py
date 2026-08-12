@@ -7,7 +7,7 @@ os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 os.environ["CREWAI_TRACING_ENABLED"] = "false"
 
 from crewai import Agent, Task, Crew, Process, LLM
-from tools import hotel_search_tool, maps_tool, activities_tool, get_fallback_hotels
+from tools import hotel_search_tool, maps_tool, activities_tool
 
 llm = LLM(
     model="openai/llama-3.1-8b-instant",
@@ -136,16 +136,19 @@ def run_research_crew(inputs: dict) -> dict:
                 hotel_candidates = hotel_candidates["hotels"]
             elif isinstance(hotel_candidates, dict):
                 hotel_candidates = [hotel_candidates]
-            if not isinstance(hotel_candidates, list) or len(hotel_candidates) == 0:
-                hotel_candidates = get_fallback_hotels(destination, budget_inr)
+            if not isinstance(hotel_candidates, list):
+                hotel_candidates = []
         except Exception as e:
             print("Failed to parse scout task JSON:", e, "Raw:", raw_0)
-            hotel_candidates = get_fallback_hotels(destination, budget_inr)
+            hotel_candidates = []
 
-        return {
+        res = {
             "hotel_candidates": hotel_candidates,
             "weather_summary": "Pleasant, clear skies",
         }
+        if not hotel_candidates:
+            res["error"] = "Our server is currently experiencing high load. Please try again in a few moments."
+        return res
 
     # If specific interests are requested, run both scout and local expert
     crew_output = research_crew.kickoff(inputs=inputs)
@@ -161,11 +164,11 @@ def run_research_crew(inputs: dict) -> dict:
             hotel_candidates = hotel_candidates["hotels"]
         elif isinstance(hotel_candidates, dict):
             hotel_candidates = [hotel_candidates]
-        if not isinstance(hotel_candidates, list) or len(hotel_candidates) == 0:
-            hotel_candidates = get_fallback_hotels(destination, budget_inr)
+        if not isinstance(hotel_candidates, list):
+            hotel_candidates = []
     except Exception as e:
         print("Failed to parse task 0 JSON. Error:", e, "Raw value:", raw_0)
-        hotel_candidates = get_fallback_hotels(destination, budget_inr)
+        hotel_candidates = []
 
     try:
         local_data = parse_json_markdown(raw_1)
@@ -173,7 +176,10 @@ def run_research_crew(inputs: dict) -> dict:
         print("Failed to parse task 1 JSON. Error:", e, "Raw value:", raw_1)
         local_data = {"weather_summary": "Sunny, 28-32°C", "highlights": []}
 
-    return {
+    res = {
         "hotel_candidates": hotel_candidates,
         "weather_summary": local_data.get("weather_summary", "Sunny, 28-32°C"),
     }
+    if not hotel_candidates:
+        res["error"] = "Our server is currently experiencing high load. Please try again in a few moments."
+    return res
