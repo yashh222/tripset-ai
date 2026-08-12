@@ -1,10 +1,13 @@
 import json
 import os
+import re
+from datetime import datetime
+
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 os.environ["CREWAI_TRACING_ENABLED"] = "false"
 
 from crewai import Agent, Task, Crew, Process, LLM
-from tools import hotel_search_tool, maps_tool, activities_tool
+from tools import hotel_search_tool, maps_tool, activities_tool, get_fallback_hotels
 
 llm = LLM(
     model="openai/llama-3.1-8b-instant",
@@ -64,6 +67,20 @@ research_crew = Crew(
 )
 
 
+def normalize_date(date_str: str) -> str:
+    if not date_str or not isinstance(date_str, str):
+        return ""
+    date_str = date_str.strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+        return date_str
+    for fmt in ("%d %b %Y", "%d %B %Y", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(date_str, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return date_str
+
+
 def parse_json_markdown(text: str):
     text = text.strip()
     if text.startswith("```"):
@@ -74,7 +91,6 @@ def parse_json_markdown(text: str):
         if text.lower().startswith("json"):
             text = text[4:].strip()
     
-    # Try to find the JSON boundaries
     start_bracket = text.find("[")
     start_brace = text.find("{")
     
@@ -93,9 +109,17 @@ def parse_json_markdown(text: str):
 
 def run_research_crew(inputs: dict) -> dict:
     """Kicks off the crew and returns parsed results in the shape the graph expects."""
+    # Normalize check-in / check-out dates to YYYY-MM-DD
+    if inputs.get("start_date"):
+        inputs["start_date"] = normalize_date(str(inputs["start_date"]))
+    if inputs.get("end_date"):
+        inputs["end_date"] = normalize_date(str(inputs["end_date"]))
+
+    destination = inputs.get("destination", "Bangkok")
+    budget_inr = inputs.get("budget_inr", 25000)
     interests = inputs.get("interests", [])
     
-    # If no specific interests are explicitly requested by user, run ONLY Hotel Scout for 6-second execution speed
+    # If no specific interests are explicitly requested by user, run ONLY Hotel Scout for fast execution speed
     if not interests:
         scout_crew = Crew(
             agents=[hotel_scout],
@@ -112,14 +136,11 @@ def run_research_crew(inputs: dict) -> dict:
                 hotel_candidates = hotel_candidates["hotels"]
             elif isinstance(hotel_candidates, dict):
                 hotel_candidates = [hotel_candidates]
+            if not isinstance(hotel_candidates, list) or len(hotel_candidates) == 0:
+                hotel_candidates = get_fallback_hotels(destination, budget_inr)
         except Exception as e:
             print("Failed to parse scout task JSON:", e, "Raw:", raw_0)
-            hotel_candidates = [
-                {"hotel_id": "h1", "name": "Sunset Resort", "price": 4200, "rating": 4.3,
-                 "location": "Baga Beach", "amenities": ["pool", "wifi", "beachfront"]},
-                {"hotel_id": "h2", "name": "Palm Grove Inn", "price": 2800, "rating": 4.0,
-                 "location": "Calangute", "amenities": ["wifi", "breakfast"]}
-            ]
+            hotel_candidates = get_fallback_hotels(destination, budget_inr)
 
         return {
             "hotel_candidates": hotel_candidates,
@@ -140,14 +161,11 @@ def run_research_crew(inputs: dict) -> dict:
             hotel_candidates = hotel_candidates["hotels"]
         elif isinstance(hotel_candidates, dict):
             hotel_candidates = [hotel_candidates]
+        if not isinstance(hotel_candidates, list) or len(hotel_candidates) == 0:
+            hotel_candidates = get_fallback_hotels(destination, budget_inr)
     except Exception as e:
         print("Failed to parse task 0 JSON. Error:", e, "Raw value:", raw_0)
-        hotel_candidates = [
-            {"hotel_id": "h1", "name": "Sunset Resort", "price": 4200, "rating": 4.3,
-             "location": "Baga Beach", "amenities": ["pool", "wifi", "beachfront"]},
-            {"hotel_id": "h2", "name": "Palm Grove Inn", "price": 2800, "rating": 4.0,
-             "location": "Calangute", "amenities": ["wifi", "breakfast"]}
-        ]
+        hotel_candidates = get_fallback_hotels(destination, budget_inr)
 
     try:
         local_data = parse_json_markdown(raw_1)
