@@ -8,7 +8,7 @@ const app = express();
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: process.env.CLIENT_URL ? process.env.CLIENT_URL.split(",") : "*",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -16,6 +16,10 @@ app.use(
 );
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", service: "Tripset AI Gateway Server" });
+});
 
 app.use("/api/auth", authRoutes);
 app.use("/api/trips", tripRoutes);
