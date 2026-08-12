@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import connectDB from "./config/database.config.js";
 import authRoutes from "./routes/auth.routes.js";
 import tripRoutes from "./routes/trip.routes.js";
 import errorHandler from "./middleware/error-handler.middleware.js";
@@ -8,9 +9,9 @@ const app = express();
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL ? process.env.CLIENT_URL.split(",") : "*",
+    origin: (_origin, callback) => callback(null, true),
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
@@ -23,6 +24,19 @@ app.get("/", (_req, res) => {
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "Tripset AI Gateway Server" });
+});
+
+// Database connection middleware for serverless API routes
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: `Database connection error: ${err.message}`,
+    });
+  }
 });
 
 app.use("/api/auth", authRoutes);
