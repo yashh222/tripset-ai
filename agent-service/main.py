@@ -6,8 +6,13 @@ except ImportError:
     pass
 
 import os
+import sys
 import uuid
+from pathlib import Path
 from typing import Optional, Union
+
+# Ensure agent-service directory is in sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
