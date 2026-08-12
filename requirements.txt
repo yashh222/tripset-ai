@@ -1,2 +1,14 @@
 --prefer-binary
--r agent-service/requirements.txt
+fastapi
+uvicorn
+pydantic
+requests
+python-dotenv
+langgraph
+langchain
+langchain-core
+langchain-community
+langchain-groq
+langchain-google-genai
+crewai
+crewai-tools

@@ -28,13 +28,15 @@ jobs:
         run: |
           python -m venv antenv
           source antenv/bin/activate
-          pip install --prefer-binary -r agent-service/requirements.txt
+          pip install --prefer-binary -r requirements.txt
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: .
+          path: |
+            .
+            !antenv/
 
   deploy:
     runs-on: ubuntu-latest
