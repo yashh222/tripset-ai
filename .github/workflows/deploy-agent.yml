@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'agent-service/**'
+      - '.github/workflows/deploy-agent.yml'
   workflow_dispatch:
 
 jobs:
@@ -35,8 +36,15 @@ jobs:
           docker push tripsetregistry.azurecr.io/tripset-agent-service:${{ github.sha }}
           docker push tripsetregistry.azurecr.io/tripset-agent-service:latest
 
-      - name: Deploy Image to Azure Container App
+      - name: Configure Container App Registry Authentication and Deploy
         run: |
+          az containerapp registry set \
+            --name tripset-agent-service \
+            --resource-group tripset-ai-rg \
+            --server tripsetregistry.azurecr.io \
+            --username ${{ secrets.REGISTRY_USERNAME }} \
+            --password ${{ secrets.REGISTRY_PASSWORD }}
+
           az containerapp update \
             --name tripset-agent-service \
             --resource-group tripset-ai-rg \
