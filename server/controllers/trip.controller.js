@@ -155,6 +155,19 @@ export async function getActiveTrip(req, res, next) {
   }
 }
 
+// DELETE /api/trips/active
+export async function resetActiveTrip(req, res, next) {
+  try {
+    const userId = req.user?.userId || req.user?.id;
+    if (userId) {
+      await ChatState.deleteOne({ userId });
+    }
+    res.status(200).json({ status: "success", message: "Active trip session cleared" });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // POST /api/trips/state
 export async function saveChatState(req, res, next) {
   try {

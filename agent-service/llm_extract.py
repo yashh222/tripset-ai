@@ -97,11 +97,12 @@ def analyze_user_prompt(raw_request: str, history: Optional[list] = None) -> dic
     current_date_ref = datetime.now().strftime("%Y-%m-%d")
     structured = llm.with_structured_output(INTENT_SCHEMA)
     extracted = structured.invoke(
-        "You are a strict data extraction system. Identify ONLY the travel requirements that are explicitly mentioned or clearly implied in the conversation history.\n"
-        f"Today's date is {current_date_ref}. Resolve any relative check-in or check-out dates (e.g. '13/8/' means check-in in August 2026).\n"
+        "You are a strict data extraction system. Identify ONLY the travel requirements that are explicitly mentioned in the conversation.\n"
+        f"Today's date is {current_date_ref}. Resolve any relative check-in or check-out dates.\n"
         "CRITICAL RULES:\n"
-        "1. Do NOT invent, guess, or hallucinate any parameters. If a field (start_date, end_date, budget_inr, travelers, destination) is not mentioned in the transcript, leave it empty/null. Do NOT supply mock defaults.\n"
-        "2. Only extract values present in the conversation.\n\n"
+        "1. The LAST message in the transcript is the user's latest prompt. If the user specifies a new destination in the latest message, ALWAYS extract that new destination, completely ignoring any old destination mentioned in prior history.\n"
+        "2. Do NOT invent, guess, or hallucinate any parameters. If a field is not mentioned, leave it empty/null.\n"
+        "3. Only extract values present in the conversation.\n\n"
         f"Conversation transcript:\n{conversation_str}"
     )
     

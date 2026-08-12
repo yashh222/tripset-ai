@@ -411,7 +411,7 @@ export default function ChatPage() {
     }
   }
 
-  function handleResetTrip() {
+  async function handleResetTrip() {
     // Save current trip messages to history before resetting
     if (tripId) {
       const entry = {
@@ -422,6 +422,21 @@ export default function ChatPage() {
       };
       setChatHistory(prev => [entry, ...prev]);
     }
+
+    // Clear active trip state in MongoDB database
+    if (token) {
+      try {
+        await fetch(`${API_URL}/trips/active`, {
+          method: "DELETE",
+          headers: {
+            "Authorization": `Bearer ${token}`
+          }
+        });
+      } catch (err) {
+        console.error("Failed to reset backend active trip:", err);
+      }
+    }
+
     setTripId(null);
     setTripStatus(null);
     setTripData(null);
