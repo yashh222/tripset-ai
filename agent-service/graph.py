@@ -72,10 +72,20 @@ def present_options(state: TripState):
 
 
 def call_hotel(state: TripState):
+    if state.get("error") or not state.get("ranked_hotels"):
+        return {"call_status": "failed", "error": state.get("error") or "No hotels available to call"}
+
+    ranked_hotels = state.get("ranked_hotels") or []
+    selected_id = state.get("selected_hotel_id")
+
     hotel = next(
-        (h for h in state.get("ranked_hotels", []) if str(h.get("hotel_id")) == str(state.get("selected_hotel_id"))),
-        state.get("ranked_hotels", [{}])[0]
+        (h for h in ranked_hotels if str(h.get("hotel_id")) == str(selected_id)),
+        ranked_hotels[0] if ranked_hotels else {}
     )
+
+    if not hotel or not hotel.get("name"):
+        return {"call_status": "failed", "error": "Selected hotel details missing"}
+
     raw = vapi_call_tool.run(
         phone_number="+919420540017",  # Test phone number
         hotel_name=hotel.get("name", "Selected Hotel"),

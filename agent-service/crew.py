@@ -42,10 +42,10 @@ scout_task = Task(
         "Constraints to respect: {constraints}. "
         "Use start_date '{start_date}' and end_date '{end_date}' when calling hotel_search_tool. Do not guess or make up dates. "
         "Return ONLY a JSON array of objects with fields: "
-        "hotel_id, name, price, rating, location, amenities."
+        "hotel_id, name, price, rating, location, amenities. Format strictly as a single JSON array e.g. [{...}, {...}]."
     ),
     agent=hotel_scout,
-    expected_output="A JSON array of hotel candidates, nothing else.",
+    expected_output="A single JSON array of hotel candidates formatted as [{...}], nothing else.",
 )
 
 local_task = Task(
@@ -90,20 +90,55 @@ def parse_json_markdown(text: str):
             text = text[3:].strip()
         if text.lower().startswith("json"):
             text = text[4:].strip()
-    
+
+    # 1. Try standard direct JSON decode
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # 2. Try array slice decode [...]
     start_bracket = text.find("[")
+    end_bracket = text.rfind("]")
+    if start_bracket != -1 and end_bracket != -1 and end_bracket > start_bracket:
+        try:
+            return json.loads(text[start_bracket:end_bracket+1])
+        except Exception:
+            pass
+
+    # 3. Try line-separated JSON objects (NDJSON)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) > 1:
+        parsed_lines = []
+        for line in lines:
+            try:
+                parsed_lines.append(json.loads(line))
+            except Exception:
+                break
+        if len(parsed_lines) == len(lines) and parsed_lines:
+            return parsed_lines
+
+    # 4. Try object slice decode {...}
     start_brace = text.find("{")
-    
-    if start_bracket != -1 and (start_brace == -1 or start_bracket < start_brace):
-        start_idx = start_bracket
-        end_idx = text.rfind("]")
-    else:
-        start_idx = start_brace
-        end_idx = text.rfind("}")
-        
-    if start_idx != -1 and end_idx != -1:
-        text = text[start_idx:end_idx+1]
-        
+    end_brace = text.rfind("}")
+    if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+        try:
+            return json.loads(text[start_brace:end_brace+1])
+        except Exception:
+            pass
+
+    # 5. Regex search for all valid JSON objects
+    dict_matches = re.findall(r'\{[^{}]*\}', text, re.DOTALL)
+    if dict_matches:
+        parsed_dicts = []
+        for m in dict_matches:
+            try:
+                parsed_dicts.append(json.loads(m))
+            except Exception:
+                pass
+        if parsed_dicts:
+            return parsed_dicts
+
     return json.loads(text)
 
 
