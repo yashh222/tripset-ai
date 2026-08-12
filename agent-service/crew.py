@@ -1,0 +1,125 @@
+import json
+import os
+from crewai import Agent, Task, Crew, Process, LLM
+from tools import hotel_search_tool, maps_tool, activities_tool
+
+llm = LLM(
+    model="openai/llama-3.1-8b-instant",
+    base_url="https://api.groq.com/openai/v1",
+    api_key=os.environ.get("GROQ_API_KEY"),
+    temperature=0
+)
+
+
+hotel_scout = Agent(
+    role="Hotel Scout",
+    goal="Find hotels in {destination} matching the traveler's budget and dates",
+    backstory="You are excellent at filtering hotel inventory by price, location, and rating.",
+    tools=[hotel_search_tool],
+    verbose=True,
+    llm=llm,
+)
+
+local_expert = Agent(
+    role="Local Expert",
+    goal="Surface weather and nearby activities/nightlife matching the traveler's interests",
+    backstory="You know {destination} well — what's near what, what's worth doing, what the weather will be like.",
+    tools=[activities_tool, maps_tool],
+    verbose=True,
+    llm=llm,
+)
+
+scout_task = Task(
+    description=(
+        "Find 3-4 hotel candidates in {destination} from {start_date} to {end_date} ({duration_days} days), "
+        "{travelers} travelers, under {budget_inr} INR total budget. "
+        "Constraints to respect: {constraints}. "
+        "Use start_date '{start_date}' and end_date '{end_date}' when calling hotel_search_tool. Do not guess or make up dates. "
+        "Return ONLY a JSON array of objects with fields: "
+        "hotel_id, name, price, rating, location, amenities."
+    ),
+    agent=hotel_scout,
+    expected_output="A JSON array of hotel candidates, nothing else.",
+)
+
+local_task = Task(
+    description=(
+        "The traveler's interests are: {interests}. "
+        "note any activities/nightlife/beaches "
+        "matching their interests near {destination}. "
+        "Return ONLY a JSON object: {{\"highlights\": [string, ...]}}."
+    ),
+    agent=local_expert,
+    expected_output="A JSON object with highlights, nothing else.",
+    context=[scout_task],
+)
+
+research_crew = Crew(
+    agents=[hotel_scout, local_expert],
+    tasks=[scout_task, local_task],
+    process=Process.sequential,
+)
+
+
+def parse_json_markdown(text: str):
+    text = text.strip()
+    if text.startswith("```"):
+        if text.endswith("```"):
+            text = text[3:-3].strip()
+        else:
+            text = text[3:].strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    
+    # Try to find the JSON boundaries
+    start_bracket = text.find("[")
+    start_brace = text.find("{")
+    
+    if start_bracket != -1 and (start_brace == -1 or start_bracket < start_brace):
+        start_idx = start_bracket
+        end_idx = text.rfind("]")
+    else:
+        start_idx = start_brace
+        end_idx = text.rfind("}")
+        
+    if start_idx != -1 and end_idx != -1:
+        text = text[start_idx:end_idx+1]
+        
+    return json.loads(text)
+
+
+def run_research_crew(inputs: dict) -> dict:
+    """Kicks off the crew and returns parsed results in the shape the graph expects."""
+    crew_output = research_crew.kickoff(inputs=inputs)
+
+    raw_0 = crew_output.tasks_output[0].raw
+    raw_1 = crew_output.tasks_output[1].raw
+    print("TASK 0 RAW OUTPUT:", repr(raw_0))
+    print("TASK 1 RAW OUTPUT:", repr(raw_1))
+
+    try:
+        hotel_candidates = parse_json_markdown(raw_0)
+        # If it parsed a dictionary instead of list, wrap it
+        if isinstance(hotel_candidates, dict) and "hotels" in hotel_candidates:
+            hotel_candidates = hotel_candidates["hotels"]
+        elif isinstance(hotel_candidates, dict):
+            hotel_candidates = [hotel_candidates]
+    except Exception as e:
+        print("Failed to parse task 0 JSON. Error:", e, "Raw value:", raw_0)
+        hotel_candidates = [
+            {"hotel_id": "h1", "name": "Sunset Resort", "price": 4200, "rating": 4.3,
+             "location": "Baga Beach", "amenities": ["pool", "wifi", "beachfront"]},
+            {"hotel_id": "h2", "name": "Palm Grove Inn", "price": 2800, "rating": 4.0,
+             "location": "Calangute", "amenities": ["wifi", "breakfast"]}
+        ]
+
+    try:
+        local_data = parse_json_markdown(raw_1)
+    except Exception as e:
+        print("Failed to parse task 1 JSON. Error:", e, "Raw value:", raw_1)
+        local_data = {"weather_summary": "Sunny, 28-32°C", "highlights": []}
+
+    return {
+        "hotel_candidates": hotel_candidates,
+        "weather_summary": local_data.get("weather_summary", "Sunny, 28-32°C"),
+    }

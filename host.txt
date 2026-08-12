@@ -1,0 +1,68 @@
+====================================================================
+               TRIPSET AI — DEPLOYMENT GUIDE (VERCEL & RENDER)
+====================================================================
+
+Tripset AI consists of three parts. Follow these steps to host them:
+
+--------------------------------------------------------------------
+STEP 1: REACT FRONTEND (Deploy to Vercel)
+--------------------------------------------------------------------
+1. Log in to your Vercel Dashboard (vercel.com)
+2. Click "Add New" -> "Project"
+3. Select this Git Repository
+4. Configure these fields:
+   - Root Directory: client
+   - Framework Preset: Vite
+   - Build Command: npm run build
+   - Output Directory: dist
+5. Open Git/Vite Environment settings in the project dashboard and add:
+   - VITE_API_URL: <URL_OF_YOUR_DEPLOYED_NODEJS_SERVER>
+6. Click "Deploy"
+
+--------------------------------------------------------------------
+STEP 2: EXPRESS GATEWAY (Deploy to Vercel or Render)
+--------------------------------------------------------------------
+If deploying to Vercel:
+1. Create a "vercel.json" file inside the "server" directory containing:
+   {
+     "version": 2,
+     "builds": [
+       { "src": "server.js", "use": "@vercel/node" }
+     ],
+     "routes": [
+       { "src": "/(.*)", "dest": "server.js" }
+     ]
+   }
+2. Ensure the "server.js" has "export default app;" at the bottom.
+3. Import the repository in Vercel, set "Root Directory" to "server".
+4. Add these Environment Variables:
+   - MONGO_URI: <your_mongodb_connection_uri>
+   - JWT_SECRET: <random_secrect_string>
+   - AGENT_SERVICE_URL: <URL_OF_YOUR_DEPLOYED_PYTHON_SERVICE>
+   - PORT: 5000
+
+Alternatively, host it on Render/Railway as a persistent Web Service.
+
+--------------------------------------------------------------------
+STEP 3: PYTHON AGENT SERVICE (Deploy to Render, Railway, or Fly.io)
+--------------------------------------------------------------------
+* NOTE: Cannot be hosted on Vercel because Vercel/Serverless has a
+  10-15 second execution timeout. CrewAI and LangGraph travel workflows
+  often take 20-50 seconds to complete internet researches and calling logic.
+
+Deployment steps (Docker or Native Python Web Service):
+1. Sign in to Render (render.com) or Railway (railway.app)
+2. Create a new "Web Service" and link your Git Repository
+3. Configure these fields:
+   - Root Directory: agent-service
+   - Runtime: Python (or Docker)
+   - Build Command: pip install -r requirements.txt
+   - Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
+4. Add these Environment Variables to the Service:
+   - GROQ_API_KEY: <your_groq_api_key>
+   - GEMINI_API_KEY: <your_gemini_api_key_for_extraction>
+   - VAPI_API_KEY: <optional_for_phone_calls>
+   - VAPI_PHONE_NUMBER_ID: <optional_for_phone_calls>
+   - PERSONAL_PHONE_NUMBER: <optional_for_testing_calls>
+5. Deploy the Web Service. Copy the deployment URL and add it to your 
+   Node Gateway configuration (as AGENT_SERVICE_URL).
