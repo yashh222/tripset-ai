@@ -1,11 +1,15 @@
 --prefer-binary
+pysqlite3-binary
 fastapi
 uvicorn
 pydantic
-python-dotenv
 requests
+python-dotenv
+langgraph
+langchain
 langchain-core
+langchain-community
 langchain-groq
 langchain-google-genai
-langgraph
 crewai
+crewai-tools

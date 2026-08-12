@@ -1,4 +1,5 @@
 --prefer-binary
+pysqlite3-binary
 fastapi
 uvicorn
 pydantic
