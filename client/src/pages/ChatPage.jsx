@@ -257,35 +257,21 @@ export default function ChatPage() {
     handleSubmit(s)
   }
 
-  // Submit initial query to start trip graph
+  // Submit query or follow-up question to trip graph / chat
   async function handleSubmit(text) {
     if (!text.trim() || isTyping) return
 
     setMessage("")
     setIsTyping(true)
 
-    // Archive current active session into chat history if present before launching new trip
-    if (messages.length > 0 && tripId) {
-      const currentTripId = tripId;
-      const archiveEntry = {
-        tripId: currentTripId,
-        messages: [...messages],
-        status: tripStatus,
-        timestamp: new Date().toISOString()
-      };
-      setChatHistory(prev => {
-        if (prev.some(item => item.tripId === currentTripId)) return prev;
-        return [archiveEntry, ...prev];
-      });
-    }
-
-    // Pre-inject user request for immediate UI feedback
+    // Pre-inject user request for immediate UI feedback (preserving active thread history)
     const userMsg = {
       id: Date.now() + "-user",
       sender: "user",
       text: text
     }
-    setMessages([userMsg])
+    const activeHistory = [...messages]
+    setMessages((prev) => [...prev, userMsg])
 
     try {
       const res = await fetch(`${API_URL}/trips`, {
@@ -294,7 +280,11 @@ export default function ChatPage() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ rawRequest: text })
+        body: JSON.stringify({
+          rawRequest: text,
+          tripId: tripId || null,
+          history: activeHistory
+        })
       })
 
       if (!res.ok) {
@@ -308,12 +298,35 @@ export default function ChatPage() {
           sender: "ai",
           text: result.chatResponse || result.error || "Our server is currently experiencing high load. Please try again in a few moments."
         }
-        setMessages([userMsg, aiMsg])
+        // Append response to ongoing thread without clearing previous chat!
+        setMessages((prev) => [...prev, aiMsg])
       } else {
+        const oldTripId = tripId
         setTripId(result.tripId)
         setTripStatus(result.status)
         setTripData(result.values)
-        setMessages(reconstructMessages(result.values))
+
+        const tripMessageIds = new Set([
+          "initial-req",
+          "hotel-recs",
+          "selected-hotel-msg",
+          "call-status",
+          "final-booking",
+          "user-dec-msg"
+        ]);
+
+        setMessages((prev) => {
+          // Freeze previous trip card IDs if tripId changed
+          const frozenPrev = prev.map(m => {
+            if (tripMessageIds.has(m.id)) {
+              return { ...m, id: `${oldTripId || 'old'}-${m.id}` };
+            }
+            return m;
+          });
+          const historyFiltered = frozenPrev.filter(m => m.id !== userMsg.id);
+          const newTripMsgs = reconstructMessages(result.values);
+          return [...historyFiltered, userMsg, ...newTripMsgs];
+        });
       }
     } catch (err) {
       showToast(err.message || "Failed to plan trip", "error")

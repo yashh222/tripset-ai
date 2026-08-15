@@ -81,19 +81,30 @@ function mapToClient(data) {
   };
 }
 
-// POST /api/trips  { rawRequest }
+// POST /api/trips  { rawRequest, tripId?, history? }
 export async function createTrip(req, res, next) {
   try {
     const userId = req.user?.userId || req.user?.id || "guest";
+    const { rawRequest, tripId, history: clientHistory } = req.body;
     
-    // Always pass clean history for new trip requests so previous location/context does not leak
-    const history = [];
+    let history = clientHistory || [];
+    if (!history.length && !tripId) {
+      try {
+        const activeState = await ChatState.findOne({ userId });
+        if (activeState && activeState.messages) {
+          history = activeState.messages;
+        }
+      } catch (dbErr) {
+        console.error("Failed to load chat state history:", dbErr);
+      }
+    }
 
     const data = await forward("/trips", {
       method: "POST",
       body: JSON.stringify({
-        rawRequest: req.body.rawRequest,
+        rawRequest,
         userId,
+        tripId: tripId || null,
         history
       }),
     });

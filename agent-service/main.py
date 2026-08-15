@@ -40,6 +40,7 @@ app = FastAPI(
 class CreateTripRequest(BaseModel):
     rawRequest: str
     userId: str
+    tripId: Optional[str] = None
     history: Optional[list] = None
 
 
@@ -88,7 +89,7 @@ async def create_trip(payload: CreateTripRequest):
     # General conversation
     if not analysis.get("is_planning_request"):
         return {
-            "tripId": None,
+            "tripId": payload.tripId or None,
             "status": "chat",
             "chatResponse": analysis.get(
                 "chat_response",
@@ -96,8 +97,8 @@ async def create_trip(payload: CreateTripRequest):
             ),
         }
 
-    # Create unique trip ID
-    trip_id = str(uuid.uuid4())
+    # Create unique trip ID or reuse active session tripId
+    trip_id = payload.tripId or str(uuid.uuid4())
 
     # LangGraph thread configuration
     config = {
