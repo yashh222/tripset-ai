@@ -63,7 +63,7 @@ export function ChatNav({ onToggleHistory, historyCount = 0 }) {
           >
             <Bell className="h-4 w-4" />
           </button>
-          
+
           <div className="relative">
             <button
               onClick={() => setShowDropdown(!showDropdown)}
@@ -78,7 +78,6 @@ export function ChatNav({ onToggleHistory, historyCount = 0 }) {
                 </p>
                 <p className="text-[11px] leading-tight text-dusk-muted">{username}</p>
               </div>
-              <ChevronDown className={cn("h-4 w-4 text-dusk-muted transition-transform", showDropdown && "rotate-180")} />
             </button>
 
             {showDropdown && (
@@ -113,12 +112,11 @@ export function ChatNav({ onToggleHistory, historyCount = 0 }) {
         <div className="flex items-center gap-3 text-sm">
           <button className="inline-flex items-center gap-1.5 font-medium text-white">
             Tripset AI 4.0
-            <ChevronDown className="h-4 w-4 text-dusk-muted" />
           </button>
           <span className="h-4 w-px bg-dusk-border" />
-          <span className="text-dusk-muted">Lisbon, Portugal</span>
+          <span className="text-dusk-muted">India, Maharashtra</span>
         </div>
-        <button 
+        <button
           onClick={onToggleHistory}
           className="inline-flex items-center gap-1.5 text-sm font-medium text-dusk-muted transition hover:text-white cursor-pointer"
         >

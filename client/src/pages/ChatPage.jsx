@@ -25,7 +25,7 @@ export default function ChatPage() {
   const [message, setMessage] = useState("")
   const [messages, setMessages] = useState([])
   const [isTyping, setIsTyping] = useState(false)
-  
+
   // Trip Lifecycle State
   const [tripId, setTripId] = useState(null)
   const [tripStatus, setTripStatus] = useState(null)
@@ -43,40 +43,49 @@ export default function ChatPage() {
   useEffect(() => {
     localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
   }, [chatHistory]);
-  
+
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, isTyping])
 
-  // 1. Recover active trip session on mount
+  // 1. Recover active session from sessionStorage on page refresh (F5)
   useEffect(() => {
-    async function loadActiveTrip() {
-      if (!token) return
-      try {
-        const res = await fetch(`${API_URL}/trips/active`, {
-          headers: {
-            "Authorization": `Bearer ${token}`
-          }
-        })
-        if (res.ok) {
-          const active = await res.json()
-          if (active) {
-            setTripId(active.tripId)
-            setTripStatus(active.status)
-            setTripData(active.values)
-            setMessages(active.messages && active.messages.length > 0 ? active.messages : reconstructMessages(active.values))
-          }
+    try {
+      const savedActive = sessionStorage.getItem("activeChatSession");
+      if (savedActive) {
+        const parsed = JSON.parse(savedActive);
+        if (parsed && parsed.messages && parsed.messages.length > 0) {
+          setTripId(parsed.tripId || null);
+          setTripStatus(parsed.status || null);
+          setTripData(parsed.values || null);
+          setMessages(parsed.messages);
         }
-      } catch (err) {
-        console.error("Failed to load active trip:", err)
       }
+    } catch (err) {
+      console.error("Failed to restore active session from sessionStorage:", err);
     }
-    loadActiveTrip()
-  }, [token])
+  }, []);
 
-  // 1b. Persist state to database whenever chat parameters change
+  // 1b. Sync active session to sessionStorage so page refresh retains active chat
+  useEffect(() => {
+    if (messages.length > 0) {
+      sessionStorage.setItem(
+        "activeChatSession",
+        JSON.stringify({
+          tripId,
+          status: tripStatus,
+          values: tripData,
+          messages,
+        })
+      );
+    } else {
+      sessionStorage.removeItem("activeChatSession");
+    }
+  }, [messages, tripId, tripStatus, tripData]);
+
+  // 1c. Persist state to database whenever chat parameters change
   useEffect(() => {
     if (!token || messages.length === 0) return
     const saveState = async () => {
@@ -150,7 +159,7 @@ export default function ChatPage() {
   function reconstructMessages(values) {
     if (!values) return []
     const list = []
-    
+
     // User initial search prompt
     if (values.rawRequest) {
       list.push({
@@ -159,7 +168,7 @@ export default function ChatPage() {
         text: values.rawRequest
       })
     }
-    
+
     // Hotel Scout/Candidate Recommendation Card List
     if (values.rankedHotels && values.rankedHotels.length > 0) {
       const weatherText = values.weatherSummary ? `\n\n🌤️ **Weather forecast for ${values.destination}:** ${values.weatherSummary}` : ""
@@ -172,7 +181,7 @@ export default function ChatPage() {
         selectedHotelId: values.selectedHotelId
       })
     }
-    
+
     // User Hotel Choice Confirmation message
     if (values.selectedHotelId) {
       const selectedHotel = values.rankedHotels?.find(h => h.hotelId === values.selectedHotelId)
@@ -181,7 +190,7 @@ export default function ChatPage() {
         sender: "user",
         text: `Chosen hotel for voice inquiry: **${selectedHotel ? selectedHotel.name : 'Selected Hotel'}**.`
       })
-      
+
       // Voice call status / transcript / final summary
       if (values.callStatus === "in_progress") {
         list.push({
@@ -216,7 +225,7 @@ export default function ChatPage() {
         sender: "user",
         text: decisionLabel
       })
-      
+
       // Booking Success / Rejected cards
       if (values.userDecision === "proceed") {
         list.push({
@@ -234,7 +243,7 @@ export default function ChatPage() {
         })
       }
     }
-    
+
     return list
   }
 
@@ -255,13 +264,28 @@ export default function ChatPage() {
     setMessage("")
     setIsTyping(true)
 
-    // Pre-inject user request to screen for immediate feedback
+    // Archive current active session into chat history if present before launching new trip
+    if (messages.length > 0 && tripId) {
+      const currentTripId = tripId;
+      const archiveEntry = {
+        tripId: currentTripId,
+        messages: [...messages],
+        status: tripStatus,
+        timestamp: new Date().toISOString()
+      };
+      setChatHistory(prev => {
+        if (prev.some(item => item.tripId === currentTripId)) return prev;
+        return [archiveEntry, ...prev];
+      });
+    }
+
+    // Pre-inject user request for immediate UI feedback
     const userMsg = {
       id: Date.now() + "-user",
       sender: "user",
       text: text
     }
-    setMessages((prev) => [...prev, userMsg])
+    setMessages([userMsg])
 
     try {
       const res = await fetch(`${API_URL}/trips`, {
@@ -284,34 +308,12 @@ export default function ChatPage() {
           sender: "ai",
           text: result.chatResponse || result.error || "Our server is currently experiencing high load. Please try again in a few moments."
         }
-        setMessages((prev) => [...prev, aiMsg])
+        setMessages([userMsg, aiMsg])
       } else {
-        const oldTripId = tripId
         setTripId(result.tripId)
         setTripStatus(result.status)
         setTripData(result.values)
-        
-        const tripMessageIds = new Set([
-          "initial-req",
-          "hotel-recs",
-          "selected-hotel-msg",
-          "call-status",
-          "final-booking",
-          "user-dec-msg"
-        ]);
-        
-        setMessages((prev) => {
-          // Freeze old active trip messages
-          const frozenPrev = prev.map(m => {
-            if (tripMessageIds.has(m.id)) {
-              return { ...m, id: `${oldTripId || 'old'}-${m.id}` };
-            }
-            return m;
-          });
-          const historyFiltered = frozenPrev.filter(m => m.id !== userMsg.id);
-          const newTripMsgs = reconstructMessages(result.values);
-          return [...historyFiltered, ...newTripMsgs];
-        });
+        setMessages(reconstructMessages(result.values))
       }
     } catch (err) {
       showToast(err.message || "Failed to plan trip", "error")
@@ -340,7 +342,7 @@ export default function ChatPage() {
       const result = await res.json()
       setTripStatus(result.status)
       setTripData(result.values)
-      
+
       const tripMessageIds = new Set([
         "initial-req",
         "hotel-recs",
@@ -382,7 +384,7 @@ export default function ChatPage() {
       const result = await res.json()
       setTripStatus(result.status)
       setTripData(result.values)
-      
+
       const tripMessageIds = new Set([
         "initial-req",
         "hotel-recs",
@@ -412,18 +414,23 @@ export default function ChatPage() {
   }
 
   async function handleResetTrip() {
-    // Save current trip messages to history before resetting
-    if (tripId) {
+    // Save current trip messages to history before resetting view
+    if (messages.length > 0) {
+      const currentTripId = tripId || Date.now().toString();
       const entry = {
-        tripId,
-        messages,
+        tripId: currentTripId,
+        messages: [...messages],
         status: tripStatus,
         timestamp: new Date().toISOString()
       };
-      setChatHistory(prev => [entry, ...prev]);
+      setChatHistory(prev => {
+        if (prev.some(item => item.tripId === currentTripId)) return prev;
+        return [entry, ...prev];
+      });
     }
 
-    // Clear active trip state in MongoDB database
+    // Clear active session from sessionStorage and MongoDB database
+    sessionStorage.removeItem("activeChatSession");
     if (token) {
       try {
         await fetch(`${API_URL}/trips/active`, {
@@ -437,6 +444,7 @@ export default function ChatPage() {
       }
     }
 
+    // Reset local view state to present a clean landing interface
     setTripId(null);
     setTripStatus(null);
     setTripData(null);
@@ -445,23 +453,6 @@ export default function ChatPage() {
     showToast("Reset chat thread. Start planning a new trip!", "info");
   }
 
-  function HistoryButton() {
-    return (
-      <button
-        onClick={() => setShowHistory(prev => !prev)}
-        className="fixed top-3.5 right-20 z-40 flex items-center gap-2 rounded-full border border-dusk-border bg-dusk-2/90 backdrop-blur-md px-3.5 py-1.5 text-xs font-semibold text-white hover:border-sunset/50 transition-all shadow-float cursor-pointer"
-        title="View Chat History"
-      >
-        <History className="h-4 w-4 text-sunset" />
-        <span>History</span>
-        {chatHistory.length > 0 && (
-          <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-sunset px-1 text-[10px] font-bold text-white">
-            {chatHistory.length}
-          </span>
-        )}
-      </button>
-    );
-  }
 
   function HistoryModal() {
     const restoreTrip = (entry) => {
@@ -518,7 +509,7 @@ export default function ChatPage() {
               chatHistory.map((item, idx) => {
                 const firstUserMsg = item.messages?.find(m => m.sender === "user")?.text || "Trip Planning Session";
                 const formattedDate = item.timestamp ? new Date(item.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : "Past session";
-                
+
                 return (
                   <div
                     key={item.tripId || idx}
@@ -579,10 +570,8 @@ export default function ChatPage() {
       <div className="shrink-0 z-30">
         <ChatNav onToggleHistory={() => setShowHistory(prev => !prev)} historyCount={chatHistory.length} />
       </div>
-        {/* History button */}
-        <HistoryButton />
-        {/* History modal */}
-        {showHistory && <HistoryModal />}
+      {/* History modal */}
+      {showHistory && <HistoryModal />}
 
       <div className="relative flex flex-1 flex-col overflow-hidden">
         {/* Flanking Orbits (left/right margins) - hidden when chatting */}
@@ -636,7 +625,7 @@ export default function ChatPage() {
             {/* Scrollable messages area */}
             <div className="flex-1 overflow-y-auto px-4 py-8 md:px-6 scrollbar-thin">
               <div className="mx-auto max-w-3xl flex flex-col gap-6 pb-36">
-                
+
                 {/* Reset Link for Chat */}
                 <div className="flex justify-between items-center mb-2 border-b border-dusk-border/40 pb-2">
                   <span className="text-xs font-semibold text-dusk-muted">Active Planning Thread</span>
@@ -653,232 +642,230 @@ export default function ChatPage() {
                   return (
                     <div
                       key={msg.id}
-                      className={`flex items-start gap-4 animate-slide-up ${
-                        msg.sender === "user" ? "justify-end" : "justify-start"
-                      }`}
-                    >
-                    {msg.sender === "ai" && (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sunset text-white font-bold text-xs shadow-soft">
-                        W
-                      </div>
-                    )}
-                                    <div className="flex-1 max-w-[85%]">
-                      <div
-                        className={`rounded-2xl px-5 py-3.5 text-[15px] leading-relaxed shadow-soft whitespace-pre-line ${
-                          msg.sender === "user"
-                            ? "bg-dusk-soft text-white border border-dusk-border ml-auto w-fit"
-                            : "glass-dark text-dusk-foreground border border-dusk-border/40"
+                      className={`flex items-start gap-4 animate-slide-up ${msg.sender === "user" ? "justify-end" : "justify-start"
                         }`}
-                      >
-                        {msg.text}
-                      </div>
+                    >
+                      {msg.sender === "ai" && (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sunset text-white font-bold text-xs shadow-soft">
+                          W
+                        </div>
+                      )}
+                      <div className="flex-1 max-w-[85%]">
+                        <div
+                          className={`rounded-2xl px-5 py-3.5 text-[15px] leading-relaxed shadow-soft whitespace-pre-line ${msg.sender === "user"
+                              ? "bg-dusk-soft text-white border border-dusk-border ml-auto w-fit"
+                              : "glass-dark text-dusk-foreground border border-dusk-border/40"
+                            }`}
+                        >
+                          {msg.text}
+                        </div>
 
-                      {/* Rendering hotel recommendation list */}
-                      {msg.sender === "ai" && msg.type === "hotels" && msg.hotels && (
-                        <div className="mt-4 space-y-3.5 text-left font-sans animate-slide-up">
-                          {msg.hotels.map((hotel) => {
-                            const isSelected = msg.selectedHotelId === hotel.hotelId;
-                            return (
-                              <div
-                                key={hotel.hotelId}
-                                className={`rounded-xl border p-4 transition-all duration-300 ${
-                                  isSelected
-                                    ? "bg-sunset/10 border-sunset/50 shadow-soft"
-                                    : "bg-dusk-2/30 border-dusk-border/40 hover:border-sunset/30"
-                                }`}
-                              >
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                  <div className="flex-1 space-y-1.5">
-                                    {/* Hotel Title and Rating */}
-                                    <div className="flex items-center gap-2">
-                                      <span className="shrink-0 text-[10px] font-bold text-sunset bg-sunset/15 px-2 py-0.5 rounded-full">
-                                        {hotel.rating} ★
-                                      </span>
-                                      <h4 className="font-display font-bold text-base text-white tracking-wide leading-tight">
-                                        {hotel.name}
-                                      </h4>
-                                    </div>
-                                    
-                                    {/* Address / Location */}
-                                    <p className="text-[12px] text-dusk-muted">
-                                      {hotel.address || "Local accommodation"}
-                                    </p>
-                                    
-                                    {/* Amenities Chips */}
-                                    {hotel.amenities && hotel.amenities.length > 0 && (
-                                      <div className="flex flex-wrap gap-1 mt-1">
-                                        {hotel.amenities.slice(0, 3).map((amenity, idx) => (
-                                          <span
-                                            key={idx}
-                                            className="text-[9px] font-medium bg-white/5 border border-white/10 px-2 py-0.5 rounded-md text-dusk-foreground"
-                                          >
-                                            {amenity}
-                                          </span>
-                                        ))}
+                        {/* Rendering hotel recommendation list */}
+                        {msg.sender === "ai" && msg.type === "hotels" && msg.hotels && (
+                          <div className="mt-4 space-y-3.5 text-left font-sans animate-slide-up">
+                            {msg.hotels.map((hotel) => {
+                              const isSelected = msg.selectedHotelId === hotel.hotelId;
+                              return (
+                                <div
+                                  key={hotel.hotelId}
+                                  className={`rounded-xl border p-4 transition-all duration-300 ${isSelected
+                                      ? "bg-sunset/10 border-sunset/50 shadow-soft"
+                                      : "bg-dusk-2/30 border-dusk-border/40 hover:border-sunset/30"
+                                    }`}
+                                >
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                    <div className="flex-1 space-y-1.5">
+                                      {/* Hotel Title and Rating */}
+                                      <div className="flex items-center gap-2">
+                                        <span className="shrink-0 text-[10px] font-bold text-sunset bg-sunset/15 px-2 py-0.5 rounded-full">
+                                          {hotel.rating} ★
+                                        </span>
+                                        <h4 className="font-display font-bold text-base text-white tracking-wide leading-tight">
+                                          {hotel.name}
+                                        </h4>
                                       </div>
-                                    )}
 
-                                    {/* Pricing details */}
-                                    <div className="mt-3 flex flex-wrap items-center gap-3.5 text-[12px] pt-1">
-                                      <div>
-                                        <span className="text-dusk-muted">Nightly: </span>
-                                        <span className="font-bold text-white">₹{hotel.pricePerNight?.toLocaleString('en-IN') || "N/A"}</span>
-                                      </div>
-                                      <div className="w-1 h-1 rounded-full bg-dusk-border" />
-                                      <div>
-                                        <span className="text-dusk-muted">Est. Total: </span>
-                                        <span className="font-bold text-white">₹{hotel.estimatedTotalCost?.toLocaleString('en-IN') || "N/A"}</span>
-                                      </div>
-                                    </div>
-
-                                    {hotel.reason && (
-                                      <p className="mt-2 text-[11px] text-sunset/90 bg-sunset/5 border border-sunset/10 p-2 rounded-lg leading-relaxed italic">
-                                        {hotel.reason}
+                                      {/* Address / Location */}
+                                      <p className="text-[12px] text-dusk-muted">
+                                        {hotel.address || "Local accommodation"}
                                       </p>
-                                    )}
-                                  </div>
 
-                                  {/* Select button on secondary column */}
-                                  <div className="shrink-0 flex items-center sm:justify-end">
-                                    {msg.selectedHotelId ? (
-                                      isSelected ? (
-                                        <span className="w-full sm:w-auto px-4 py-2 text-center text-xs font-bold text-sunset bg-sunset/10 border border-sunset/20 rounded-lg">
-                                          ✓ Chosen Option
-                                        </span>
-                                      ) : null
-                                    ) : (
-                                      isHistorical ? (
-                                        <span className="w-full sm:w-auto px-4 py-2 text-center text-xs font-semibold text-dusk-muted bg-white/5 rounded-lg border border-white/5">
-                                          Completed
-                                        </span>
+                                      {/* Amenities Chips */}
+                                      {hotel.amenities && hotel.amenities.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                          {hotel.amenities.slice(0, 3).map((amenity, idx) => (
+                                            <span
+                                              key={idx}
+                                              className="text-[9px] font-medium bg-white/5 border border-white/10 px-2 py-0.5 rounded-md text-dusk-foreground"
+                                            >
+                                              {amenity}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+
+                                      {/* Pricing details */}
+                                      <div className="mt-3 flex flex-wrap items-center gap-3.5 text-[12px] pt-1">
+                                        <div>
+                                          <span className="text-dusk-muted">Nightly: </span>
+                                          <span className="font-bold text-white">₹{hotel.pricePerNight?.toLocaleString('en-IN') || "N/A"}</span>
+                                        </div>
+                                        <div className="w-1 h-1 rounded-full bg-dusk-border" />
+                                        <div>
+                                          <span className="text-dusk-muted">Est. Total: </span>
+                                          <span className="font-bold text-white">₹{hotel.estimatedTotalCost?.toLocaleString('en-IN') || "N/A"}</span>
+                                        </div>
+                                      </div>
+
+                                      {hotel.reason && (
+                                        <p className="mt-2 text-[11px] text-sunset/90 bg-sunset/5 border border-sunset/10 p-2 rounded-lg leading-relaxed italic">
+                                          {hotel.reason}
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    {/* Select button on secondary column */}
+                                    <div className="shrink-0 flex items-center sm:justify-end">
+                                      {msg.selectedHotelId ? (
+                                        isSelected ? (
+                                          <span className="w-full sm:w-auto px-4 py-2 text-center text-xs font-bold text-sunset bg-sunset/10 border border-sunset/20 rounded-lg">
+                                            ✓ Chosen Option
+                                          </span>
+                                        ) : null
                                       ) : (
-                                        <button
-                                          onClick={() => handleSelectHotel(hotel.hotelId)}
-                                          className="w-full sm:w-auto bg-sunset text-white py-2 px-5 rounded-lg text-xs font-bold shadow-soft hover:brightness-115 active:scale-95 transition-all duration-200 cursor-pointer text-center"
-                                        >
-                                          Select Hotel
-                                        </button>
-                                      )
-                                    )}
+                                        isHistorical ? (
+                                          <span className="w-full sm:w-auto px-4 py-2 text-center text-xs font-semibold text-dusk-muted bg-white/5 rounded-lg border border-white/5">
+                                            Completed
+                                          </span>
+                                        ) : (
+                                          <button
+                                            onClick={() => handleSelectHotel(hotel.hotelId)}
+                                            className="w-full sm:w-auto bg-sunset text-white py-2 px-5 rounded-lg text-xs font-bold shadow-soft hover:brightness-115 active:scale-95 transition-all duration-200 cursor-pointer text-center"
+                                          >
+                                            Select Hotel
+                                          </button>
+                                        )
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Rendering calling loading status */}
+                        {msg.sender === "ai" && msg.type === "calling" && (
+                          <div className="mt-3 flex flex-col gap-2.5 rounded-xl border border-dusk-border/40 bg-dusk-soft/10 p-4 text-left font-sans animate-slide-up">
+                            <div className="flex items-center gap-3">
+                              <span className="relative flex h-3.5 w-3.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sunset opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-sunset"></span>
+                              </span>
+                              <p className="text-sm font-semibold text-white">Outbound Call Connection Active...</p>
+                            </div>
+                            <p className="text-xs text-dusk-muted leading-relaxed">
+                              Vapi voice agent is negotiating with front-desk options at **{msg.hotelName}** to retrieve amenities, double-occupancy quotes, policies and checklist details.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Rendering completed call summary */}
+                        {msg.sender === "ai" && msg.type === "call_summary" && msg.callSummary && (
+                          <div className="mt-4 rounded-xl border border-dusk-border/60 bg-dusk-2/60 p-5 shadow-float text-left font-sans animate-slide-up">
+                            <h4 className="text-xs font-extrabold text-white uppercase tracking-wider mb-3">Vapi Agent Verification Details</h4>
+                            <div className="grid grid-cols-2 gap-3.5">
+                              <div className="bg-white/5 p-3 rounded-lg border border-white/5">
+                                <p className="text-[10px] text-dusk-muted">Negotiated Quote</p>
+                                <p className="text-xs font-extrabold text-white mt-0.5">₹{msg.callSummary.finalPrice?.toLocaleString('en-IN') || "N/A"}</p>
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {/* Rendering calling loading status */}
-                      {msg.sender === "ai" && msg.type === "calling" && (
-                        <div className="mt-3 flex flex-col gap-2.5 rounded-xl border border-dusk-border/40 bg-dusk-soft/10 p-4 text-left font-sans animate-slide-up">
-                          <div className="flex items-center gap-3">
-                            <span className="relative flex h-3.5 w-3.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sunset opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-sunset"></span>
-                            </span>
-                            <p className="text-sm font-semibold text-white">Outbound Call Connection Active...</p>
-                          </div>
-                          <p className="text-xs text-dusk-muted leading-relaxed">
-                            Vapi voice agent is negotiating with front-desk options at **{msg.hotelName}** to retrieve amenities, double-occupancy quotes, policies and checklist details.
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Rendering completed call summary */}
-                      {msg.sender === "ai" && msg.type === "call_summary" && msg.callSummary && (
-                        <div className="mt-4 rounded-xl border border-dusk-border/60 bg-dusk-2/60 p-5 shadow-float text-left font-sans animate-slide-up">
-                          <h4 className="text-xs font-extrabold text-white uppercase tracking-wider mb-3">Vapi Agent Verification Details</h4>
-                          <div className="grid grid-cols-2 gap-3.5">
-                            <div className="bg-white/5 p-3 rounded-lg border border-white/5">
-                              <p className="text-[10px] text-dusk-muted">Negotiated Quote</p>
-                              <p className="text-xs font-extrabold text-white mt-0.5">₹{msg.callSummary.finalPrice?.toLocaleString('en-IN') || "N/A"}</p>
-                            </div>
-                            <div className="bg-white/5 p-3 rounded-lg border border-white/5">
-                              <p className="text-[10px] text-dusk-muted">Breakfast Included</p>
-                              <p className="text-xs font-extrabold text-white mt-0.5">{msg.callSummary.breakfastIncluded ? "Yes (Free)" : "No"}</p>
-                            </div>
-                            <div className="bg-white/5 p-3 rounded-lg border border-white/5 col-span-2">
-                              <p className="text-[10px] text-dusk-muted">Cancellation Terms</p>
-                              <p className="text-xs font-semibold text-white mt-1">{msg.callSummary.cancellationPolicy || "Standard terms apply"}</p>
-                            </div>
-                          </div>
-
-                          {msg.callSummary.amenitiesConfirmed && msg.callSummary.amenitiesConfirmed.length > 0 && (
-                            <div className="mt-3.5">
-                              <p className="text-[10px] text-dusk-muted">In-house Conveniences Confirmed</p>
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                {msg.callSummary.amenitiesConfirmed.map((a, idx) => (
-                                  <span key={idx} className="text-[9px] bg-sunset/10 text-sunset px-1.5 py-0.5 rounded border border-sunset/10 font-bold">
-                                    {a}
-                                  </span>
-                                ))}
+                              <div className="bg-white/5 p-3 rounded-lg border border-white/5">
+                                <p className="text-[10px] text-dusk-muted">Breakfast Included</p>
+                                <p className="text-xs font-extrabold text-white mt-0.5">{msg.callSummary.breakfastIncluded ? "Yes (Free)" : "No"}</p>
+                              </div>
+                              <div className="bg-white/5 p-3 rounded-lg border border-white/5 col-span-2">
+                                <p className="text-[10px] text-dusk-muted">Cancellation Terms</p>
+                                <p className="text-xs font-semibold text-white mt-1">{msg.callSummary.cancellationPolicy || "Standard terms apply"}</p>
                               </div>
                             </div>
-                          )}
 
-                          {msg.callSummary.raw && (
-                            <div className="mt-4 border-t border-white/5 pt-3">
-                              <details className="group cursor-pointer">
-                                <summary className="text-[10px] text-dusk-muted hover:text-white flex items-center justify-between focus:outline-none">
-                                  <span>Review Vapi Phone Conversation Transcript</span>
-                                  <span className="text-xs transition-transform group-open:rotate-180">▼</span>
-                                </summary>
-                                <div className="mt-3 p-3 bg-dusk bg-opacity-70 rounded-lg border border-dusk-border/40 text-[10px] font-mono leading-relaxed text-dusk-muted max-h-40 overflow-y-auto whitespace-pre-wrap select-text">
-                                  {msg.callSummary.raw}
+                            {msg.callSummary.amenitiesConfirmed && msg.callSummary.amenitiesConfirmed.length > 0 && (
+                              <div className="mt-3.5">
+                                <p className="text-[10px] text-dusk-muted">In-house Conveniences Confirmed</p>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {msg.callSummary.amenitiesConfirmed.map((a, idx) => (
+                                    <span key={idx} className="text-[9px] bg-sunset/10 text-sunset px-1.5 py-0.5 rounded border border-sunset/10 font-bold">
+                                      {a}
+                                    </span>
+                                  ))}
                                 </div>
-                              </details>
-                            </div>
-                          )}
+                              </div>
+                            )}
+
+                            {msg.callSummary.raw && (
+                              <div className="mt-4 border-t border-white/5 pt-3">
+                                <details className="group cursor-pointer">
+                                  <summary className="text-[10px] text-dusk-muted hover:text-white flex items-center justify-between focus:outline-none">
+                                    <span>Review Vapi Phone Conversation Transcript</span>
+                                    <span className="text-xs transition-transform group-open:rotate-180">▼</span>
+                                  </summary>
+                                  <div className="mt-3 p-3 bg-dusk bg-opacity-70 rounded-lg border border-dusk-border/40 text-[10px] font-mono leading-relaxed text-dusk-muted max-h-40 overflow-y-auto whitespace-pre-wrap select-text">
+                                    {msg.callSummary.raw}
+                                  </div>
+                                </details>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Rendering Success Booking */}
+                        {msg.sender === "ai" && msg.type === "booking_success" && (
+                          <div className="mt-3 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-left font-sans animate-slide-up">
+                            <p className="text-sm font-semibold text-green-400">✓ Booking Finalized Successfully</p>
+                            <p className="text-xs text-dusk-muted mt-1 leading-normal">
+                              We have synced booking confirmation files with your user account. Your travel dates are secured!
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Rendering Rejected Booking */}
+                        {msg.sender === "ai" && msg.type === "booking_rejected" && (
+                          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-left font-sans animate-slide-up">
+                            <p className="text-sm font-semibold text-red-400">✗ Inquiry Cancelled</p>
+                            <p className="text-xs text-dusk-muted mt-1 leading-normal">
+                              This planning thread has been archived. Submit a new query below to find another destination.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Rendering Success Booking */}
+                        {msg.sender === "ai" && msg.type === "booking_success" && (
+                          <div className="mt-3 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-left font-sans animate-slide-up">
+                            <p className="text-sm font-semibold text-green-400">✓ Booking Finalized Successfully</p>
+                            <p className="text-xs text-dusk-muted mt-1 leading-normal">
+                              We have synced booking confirmation files with your user account. Your travel dates are secured!
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Rendering Rejected Booking */}
+                        {msg.sender === "ai" && msg.type === "booking_rejected" && (
+                          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-left font-sans animate-slide-up">
+                            <p className="text-sm font-semibold text-red-400">✗ Inquiry Cancelled</p>
+                            <p className="text-xs text-dusk-muted mt-1 leading-normal">
+                              This planning thread has been archived. Submit a new query below to find another destination.
+                            </p>
+                          </div>
+                        )}               </div>
+
+                      {msg.sender === "user" && (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/95 text-white font-bold text-xs uppercase shadow-soft">
+                          {getInitials(user?.name)}
                         </div>
                       )}
-
-                      {/* Rendering Success Booking */}
-                      {msg.sender === "ai" && msg.type === "booking_success" && (
-                        <div className="mt-3 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-left font-sans animate-slide-up">
-                          <p className="text-sm font-semibold text-green-400">✓ Booking Finalized Successfully</p>
-                          <p className="text-xs text-dusk-muted mt-1 leading-normal">
-                            We have synced booking confirmation files with your user account. Your travel dates are secured!
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Rendering Rejected Booking */}
-                      {msg.sender === "ai" && msg.type === "booking_rejected" && (
-                        <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-left font-sans animate-slide-up">
-                          <p className="text-sm font-semibold text-red-400">✗ Inquiry Cancelled</p>
-                          <p className="text-xs text-dusk-muted mt-1 leading-normal">
-                            This planning thread has been archived. Submit a new query below to find another destination.
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Rendering Success Booking */}
-                      {msg.sender === "ai" && msg.type === "booking_success" && (
-                        <div className="mt-3 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-left font-sans animate-slide-up">
-                          <p className="text-sm font-semibold text-green-400">✓ Booking Finalized Successfully</p>
-                          <p className="text-xs text-dusk-muted mt-1 leading-normal">
-                            We have synced booking confirmation files with your user account. Your travel dates are secured!
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Rendering Rejected Booking */}
-                      {msg.sender === "ai" && msg.type === "booking_rejected" && (
-                        <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-left font-sans animate-slide-up">
-                          <p className="text-sm font-semibold text-red-400">✗ Inquiry Cancelled</p>
-                          <p className="text-xs text-dusk-muted mt-1 leading-normal">
-                            This planning thread has been archived. Submit a new query below to find another destination.
-                          </p>
-                        </div>
-                      )}               </div>
-
-                    {msg.sender === "user" && (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/95 text-white font-bold text-xs uppercase shadow-soft">
-                        {getInitials(user?.name)}
-                      </div>
-                    )}
-                  </div>
-                )})}
+                    </div>
+                  )
+                })}
 
                 {isTyping && (
                   <div className="flex items-start gap-4 justify-start animate-fade-in">

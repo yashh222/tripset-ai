@@ -2,53 +2,111 @@
 
 export const featuredDestinations = [
   {
-    id: "kyoto",
-    name: "Kyoto",
-    country: "Japan",
-    price: 1240,
+    id: "goa",
+    name: "Goa",
+    country: "India",
+    price: 320,
+    category: "Beaches",
     image:
-      "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?q=80&w=1200&auto=format&fit=crop",
-    tag: "Temples & cherry blossoms",
+      "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?q=80&w=1200&auto=format&fit=crop",
+    tag: "Beaches & sunsets",
   },
   {
-    id: "santorini",
-    name: "Santorini",
-    country: "Greece",
-    price: 980,
+    id: "jaipur",
+    name: "Jaipur",
+    country: "India",
+    price: 280,
+    category: "Culture",
     image:
-      "https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?q=80&w=1200&auto=format&fit=crop",
-    tag: "Cliffside sunsets",
+      "https://images.unsplash.com/photo-1477587458883-47145ed94245?q=80&w=1200&auto=format&fit=crop",
+    tag: "Forts & royal heritage",
   },
   {
-    id: "banff",
-    name: "Banff",
-    country: "Canada",
-    price: 860,
+    id: "kerala",
+    name: "Kerala",
+    country: "India",
+    price: 360,
+    category: "Nature",
     image:
-      "https://images.unsplash.com/photo-1609825488888-3a766db05542?q=80&w=1200&auto=format&fit=crop",
-    tag: "Alpine lakes",
+      "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?q=80&w=1200&auto=format&fit=crop",
+    tag: "Backwaters & greenery",
   },
   {
-    id: "marrakech",
-    name: "Marrakech",
-    country: "Morocco",
-    price: 640,
+    id: "phuket",
+    name: "Phuket",
+    country: "Thailand",
+    price: 520,
+    category: "Beaches",
     image:
-      "https://images.unsplash.com/photo-1597212618440-806262de4f6b?q=80&w=1200&auto=format&fit=crop",
-    tag: "Souks & riads",
+      "https://images.unsplash.com/photo-1589394815804-964ed0be2eb5?q=80&w=1200&auto=format&fit=crop",
+    tag: "Tropical beaches",
+  },
+  {
+    id: "bangkok",
+    name: "Bangkok",
+    country: "Thailand",
+    price: 480,
+    category: "Cities",
+    image:
+      "https://images.unsplash.com/photo-1508009603885-50cf7c579365?q=80&w=1200&auto=format&fit=crop",
+    tag: "Temples & city lights",
+  },
+  {
+    id: "paris",
+    name: "Paris",
+    country: "France",
+    price: 920,
+    category: "Cities",
+    image:
+      "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?q=80&w=1200&auto=format&fit=crop",
+    tag: "Art & iconic streets",
+  },
+  {
+    id: "interlaken",
+    name: "Interlaken",
+    country: "Switzerland",
+    price: 1180,
+    category: "Mountains",
+    image:
+      "https://images.unsplash.com/photo-1527668752968-14dc70a27c95?q=80&w=1200&auto=format&fit=crop",
+    tag: "Alps & mountain lakes",
   },
   {
     id: "amalfi",
-    name: "Amalfi",
+    name: "Amalfi Coast",
     country: "Italy",
-    price: 1120,
+    price: 1080,
+    category: "Beaches",
     image:
       "https://images.unsplash.com/photo-1533104816931-20fa691ff6ca?q=80&w=1200&auto=format&fit=crop",
     tag: "Coastal drives",
   },
 ]
-
 export const orbitDestinations = [
+  {
+    id: "goa",
+    name: "Goa",
+    country: "India",
+    price: 320,
+    image:
+      "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?q=80&w=600&auto=format&fit=crop",
+  },
+  {
+    id: "jaipur",
+    name: "Jaipur",
+    country: "India",
+    price: 280,
+    image:
+      "https://images.unsplash.com/photo-1477587458883-47145ed94245?q=80&w=600&auto=format&fit=crop",
+  },
+  {
+    id: "phuket",
+    name: "Phuket",
+    country: "Thailand",
+    price: 520,
+    image:
+      "https://images.unsplash.com/photo-1589394815804-964ed0be2eb5?q=80&w=600&auto=format&fit=crop",
+  },
   {
     id: "paris",
     name: "Paris",
@@ -58,45 +116,21 @@ export const orbitDestinations = [
       "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?q=80&w=600&auto=format&fit=crop",
   },
   {
-    id: "rome",
-    name: "Rome",
-    country: "Italy",
-    price: 820,
+    id: "interlaken",
+    name: "Interlaken",
+    country: "Switzerland",
+    price: 1180,
     image:
-      "https://images.unsplash.com/photo-1552832230-c0197dd311b5?q=80&w=600&auto=format&fit=crop",
-  },
-  {
-    id: "venice",
-    name: "Venice",
-    country: "Italy",
-    price: 900,
-    image:
-      "https://images.unsplash.com/photo-1514890547357-a9ee288728e0?q=80&w=600&auto=format&fit=crop",
-  },
-  {
-    id: "bali",
-    name: "Bali",
-    country: "Indonesia",
-    price: 720,
-    image:
-      "https://images.unsplash.com/photo-1537996194471-e657df975ab4?q=80&w=600&auto=format&fit=crop",
-  },
-  {
-    id: "cyclades",
-    name: "Cyclades",
-    country: "Greece",
-    price: 940,
-    image:
-      "https://images.unsplash.com/photo-1613395877344-13d4a8e0d49e?q=80&w=600&auto=format&fit=crop",
+      "https://images.unsplash.com/photo-1527668752968-14dc70a27c95?q=80&w=600&auto=format&fit=crop",
   },
 ]
 
 export const chatSuggestions = [
-  "7-day trip to Portugal this spring",
-  "Budget-friendly week in Vietnam",
-  "Best islands for a winter escape",
-  "Hidden gems in northern Italy",
-  "Where to see the northern lights",
+  "Plan a 7-day trip to Goa",
+  "Plan a Rajasthan road trip",
+  "Find a peaceful Kerala getaway",
+  "Plan a Ladakh adventure",
+  "Discover hidden gems in India",
 ]
 
 export const stats = [

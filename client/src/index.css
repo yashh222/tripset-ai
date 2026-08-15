@@ -66,6 +66,11 @@ body,
   height: 100%;
 }
 
+html {
+  overflow-x: hidden;
+  background-color: var(--color-dusk);
+}
+
 body {
   margin: 0;
   background-color: var(--color-dusk);
@@ -109,13 +114,16 @@ body {
   background-image: linear-gradient(135deg, #f0653c 0%, #f5a623 100%);
 }
 
+/* Hide scrollbar visually while keeping full scroll functionality */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  display: none;
+  width: 0;
+  height: 0;
 }
-::-webkit-scrollbar-thumb {
-  background: color-mix(in oklab, var(--color-muted-foreground) 40%, transparent);
-  border-radius: 999px;
+
+html, body, *, .scrollbar-thin {
+  -ms-overflow-style: none; /* IE & Edge */
+  scrollbar-width: none;  /* Firefox */
 }
 
 @keyframes rise {

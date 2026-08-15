@@ -12,11 +12,11 @@ export function Hero() {
       <div className="relative overflow-hidden rounded-b-[2.5rem]">
         {/* Background image */}
         <img
-          src="/hero-coast.png"
+          src="https://res.cloudinary.com/shpt76oi/image/upload/v1786782341/avin-cp-5Z8gRPmXLS4-unsplash_xaq3a2.jpg"
           alt="Aerial view of a golden-hour coastline"
           className="absolute inset-0 h-full w-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-dusk/60 via-dusk/25 to-dusk/70" />
+        <div className="absolute inset-0 bg-gradient-to-b from-dusk/70 via-dusk/55 to-dusk/75" />
 
         {/* Content */}
         <div className="relative mx-auto flex min-h-[86vh] max-w-6xl flex-col items-center justify-center px-6 pt-28 text-center">

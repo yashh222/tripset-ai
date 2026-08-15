@@ -37,7 +37,7 @@ export function Footer() {
       </div>
       <div className="border-t border-border">
         <p className="mx-auto max-w-6xl px-6 py-6 text-sm text-muted-foreground">
-          © {new Date().getFullYear()} Tripset AI. Designed for the curious.
+          © {new Date().getFullYear()} Tripset AI. Designed by Yash.
         </p>
       </div>
     </footer>
