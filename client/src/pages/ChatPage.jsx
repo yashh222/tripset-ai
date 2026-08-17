@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react"
-import { RotateCw, MessageSquare, History, Trash2, X, Clock } from "lucide-react"
+import { RotateCw, MessageSquare, History, Trash2, X, Clock, PhoneCall } from "lucide-react"
 import { ChatNav } from "@/components/chat/ChatNav"
 import { ChatComposer } from "@/components/chat/ChatComposer"
 import { DestinationOrbit } from "@/components/chat/DestinationOrbit"
@@ -26,23 +26,84 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([])
   const [isTyping, setIsTyping] = useState(false)
 
+  // User identity and storage keys
+  const userId = user?.id || user?._id || null;
+  const historyStorageKey = userId ? `tripset_chat_history_${userId}` : null;
+  const activeSessionStorageKey = userId ? `tripset_active_chat_${userId}` : null;
+
   // Trip Lifecycle State
   const [tripId, setTripId] = useState(null)
   const [tripStatus, setTripStatus] = useState(null)
   const [tripData, setTripData] = useState(null);
-  // Chat history persistence
-  const [showHistory, setShowHistory] = useState(false);
-  const [chatHistory, setChatHistory] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('chatHistory') || '[]');
-    } catch {
-      return [];
-    }
-  });
-  // Persist chatHistory to localStorage
+  
+  // Refs to protect against stale async callbacks and race conditions
+  const userIdRef = useRef(userId);
+  const tripIdRef = useRef(tripId);
+
   useEffect(() => {
-    localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
-  }, [chatHistory]);
+    userIdRef.current = userId;
+  }, [userId]);
+
+  useEffect(() => {
+    tripIdRef.current = tripId;
+  }, [tripId]);
+
+  // Chat history persistence (User Scoped)
+  const [showHistory, setShowHistory] = useState(false);
+  const [chatHistory, setChatHistory] = useState([]);
+
+  // Load chat history from MongoDB when user changes or component mounts
+  useEffect(() => {
+    if (!token || !userId) {
+      setChatHistory([]);
+      return;
+    }
+
+    let isSubscribed = true;
+
+    async function fetchMongoHistory() {
+      try {
+        const res = await fetch(`${API_URL}/trips/history`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (res.ok && isSubscribed) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            setChatHistory(data);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error loading chat history from MongoDB:", err);
+      }
+
+      // Fallback to user-scoped localStorage
+      if (historyStorageKey && isSubscribed) {
+        try {
+          const saved = localStorage.getItem(historyStorageKey);
+          setChatHistory(saved ? JSON.parse(saved) : []);
+        } catch {
+          setChatHistory([]);
+        }
+      }
+    }
+
+    fetchMongoHistory();
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [token, userId, historyStorageKey]);
+
+  // Save chatHistory to user-scoped localStorage key as offline fallback
+  useEffect(() => {
+    if (!historyStorageKey) return;
+    try {
+      localStorage.setItem(historyStorageKey, JSON.stringify(chatHistory));
+    } catch (err) {
+      console.error("Failed to save user chat history to localStorage:", err);
+    }
+  }, [chatHistory, historyStorageKey]);
 
   const messagesEndRef = useRef(null)
 
@@ -50,29 +111,77 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, isTyping])
 
-  // 1. Recover active session from sessionStorage on page refresh (F5)
+  // 1. Reinitialize state when user changes or component mounts
   useEffect(() => {
-    try {
-      const savedActive = sessionStorage.getItem("activeChatSession");
-      if (savedActive) {
-        const parsed = JSON.parse(savedActive);
-        if (parsed && parsed.messages && parsed.messages.length > 0) {
-          setTripId(parsed.tripId || null);
-          setTripStatus(parsed.status || null);
-          setTripData(parsed.values || null);
-          setMessages(parsed.messages);
+    if (!userId || !token) {
+      setTripId(null);
+      setTripStatus(null);
+      setTripData(null);
+      setMessages([]);
+      return;
+    }
+
+    let isSubscribed = true;
+    const currentReqUser = userId;
+
+    async function initUserSession() {
+      // Clear old view first
+      setTripId(null);
+      setTripStatus(null);
+      setTripData(null);
+      setMessages([]);
+
+      // 1a. Try loading active session from DB for the authenticated user
+      try {
+        const res = await fetch(`${API_URL}/trips/active`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (res.ok && isSubscribed) {
+          const activeState = await res.json();
+          if (userIdRef.current === currentReqUser && activeState && activeState.messages && activeState.messages.length > 0) {
+            setTripId(activeState.tripId || null);
+            setTripStatus(activeState.status || null);
+            setTripData(activeState.values || null);
+            setMessages(activeState.messages);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error loading active trip from DB:", err);
+      }
+
+      // 1b. Fallback to user-scoped sessionStorage
+      if (activeSessionStorageKey && isSubscribed && userIdRef.current === currentReqUser) {
+        try {
+          const savedActive = sessionStorage.getItem(activeSessionStorageKey);
+          if (savedActive) {
+            const parsed = JSON.parse(savedActive);
+            if (parsed && parsed.messages && parsed.messages.length > 0) {
+              setTripId(parsed.tripId || null);
+              setTripStatus(parsed.status || null);
+              setTripData(parsed.values || null);
+              setMessages(parsed.messages);
+            }
+          }
+        } catch (err) {
+          console.error("Failed to restore active session from sessionStorage:", err);
         }
       }
-    } catch (err) {
-      console.error("Failed to restore active session from sessionStorage:", err);
     }
-  }, []);
 
-  // 1b. Sync active session to sessionStorage so page refresh retains active chat
+    initUserSession();
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [userId, token, activeSessionStorageKey]);
+
+  // 1b. Sync active session to user-scoped sessionStorage
   useEffect(() => {
+    if (!activeSessionStorageKey) return;
     if (messages.length > 0) {
       sessionStorage.setItem(
-        "activeChatSession",
+        activeSessionStorageKey,
         JSON.stringify({
           tripId,
           status: tripStatus,
@@ -81,14 +190,16 @@ export default function ChatPage() {
         })
       );
     } else {
-      sessionStorage.removeItem("activeChatSession");
+      sessionStorage.removeItem(activeSessionStorageKey);
     }
-  }, [messages, tripId, tripStatus, tripData]);
+  }, [messages, tripId, tripStatus, tripData, activeSessionStorageKey]);
 
-  // 1c. Persist state to database whenever chat parameters change
+  // 1c. Persist state to database (debounced and user-isolated)
   useEffect(() => {
-    if (!token || messages.length === 0) return
+    if (!token || !userId || messages.length === 0) return;
+    const currentSaveUser = userId;
     const saveState = async () => {
+      if (userIdRef.current !== currentSaveUser) return;
       try {
         await fetch(`${API_URL}/trips/state`, {
           method: "POST",
@@ -109,13 +220,17 @@ export default function ChatPage() {
     }
     const handler = setTimeout(saveState, 600)
     return () => clearTimeout(handler)
-  }, [messages, tripId, tripStatus, tripData, token])
+  }, [messages, tripId, tripStatus, tripData, token, userId])
 
   // 2. Poll Vapi call details if call is currently in_progress
   useEffect(() => {
-    let timer
-    if (tripId && tripData?.callStatus === "in_progress") {
+    let timer;
+    if (userId && tripId && tripData?.callStatus === "in_progress" && token) {
+      const currentPollUser = userId;
+      const currentPollTrip = tripId;
+
       const pollTrip = async () => {
+        if (userIdRef.current !== currentPollUser || tripIdRef.current !== currentPollTrip) return;
         try {
           const res = await fetch(`${API_URL}/trips/${tripId}`, {
             headers: {
@@ -124,20 +239,22 @@ export default function ChatPage() {
           })
           if (res.ok) {
             const data = await res.json()
+            if (userIdRef.current !== currentPollUser || tripIdRef.current !== currentPollTrip) return;
             if (data.callStatus === "completed" || data.callStatus === "failed") {
               setTripData(data)
-              setTripStatus(data.status)
+              const activeTripIdKey = currentPollTrip || 'current';
               const tripMessageIds = new Set([
-                "initial-req",
-                "hotel-recs",
-                "selected-hotel-msg",
-                "call-status",
-                "final-booking",
-                "user-dec-msg"
+                `${activeTripIdKey}-initial-req`,
+                `${activeTripIdKey}-hotel-recs`,
+                `${activeTripIdKey}-selected-hotel-msg`,
+                `${activeTripIdKey}-call-status`,
+                `${activeTripIdKey}-final-booking`,
+                `${activeTripIdKey}-user-dec-msg`,
+                "initial-req", "hotel-recs", "selected-hotel-msg", "call-status", "final-booking", "user-dec-msg"
               ]);
               setMessages((prev) => {
                 const nonTripMsgs = prev.filter(m => !tripMessageIds.has(m.id));
-                const updatedTripMsgs = reconstructMessages(data.values || data);
+                const updatedTripMsgs = reconstructMessages(data.values || data, activeTripIdKey);
                 return [...nonTripMsgs, ...updatedTripMsgs];
               });
             }
@@ -153,17 +270,18 @@ export default function ChatPage() {
     return () => {
       if (timer) clearInterval(timer)
     }
-  }, [tripId, tripStatus, tripData?.callStatus, token])
+  }, [tripId, tripStatus, tripData?.callStatus, token, userId])
 
   // Helper to translate backend LangGraph state into chat messages
-  function reconstructMessages(values) {
+  function reconstructMessages(values, activeTripIdKey = null) {
     if (!values) return []
     const list = []
+    const prefix = activeTripIdKey ? `${activeTripIdKey}-` : ""
 
     // User initial search prompt
     if (values.rawRequest) {
       list.push({
-        id: "initial-req",
+        id: `${prefix}initial-req`,
         sender: "user",
         text: values.rawRequest
       })
@@ -173,7 +291,7 @@ export default function ChatPage() {
     if (values.rankedHotels && values.rankedHotels.length > 0) {
       const weatherText = values.weatherSummary ? `\n\n🌤️ **Weather forecast for ${values.destination}:** ${values.weatherSummary}` : ""
       list.push({
-        id: "hotel-recs",
+        id: `${prefix}hotel-recs`,
         sender: "ai",
         text: `Based on your request, I structured a travel plan for **${values.destination}** and scouted premium hotel accommodations matching your constraints.${weatherText}\n\nSelect a candidate below to initiate an outbound Vapi voice verification:`,
         type: "hotels",
@@ -186,7 +304,7 @@ export default function ChatPage() {
     if (values.selectedHotelId) {
       const selectedHotel = values.rankedHotels?.find(h => h.hotelId === values.selectedHotelId)
       list.push({
-        id: "selected-hotel-msg",
+        id: `${prefix}selected-hotel-msg`,
         sender: "user",
         text: `Chosen hotel for voice inquiry: **${selectedHotel ? selectedHotel.name : 'Selected Hotel'}**.`
       })
@@ -194,7 +312,7 @@ export default function ChatPage() {
       // Voice call status / transcript / final summary
       if (values.callStatus === "in_progress") {
         list.push({
-          id: "call-status",
+          id: `${prefix}call-status`,
           sender: "ai",
           text: `Contacting hotel via agent to request availability and terms...`,
           type: "calling",
@@ -206,7 +324,7 @@ export default function ChatPage() {
           : `Vapi voice inquiry completed! Here is the negotiated final quote and booking details gathered from **${selectedHotel ? selectedHotel.name : 'the hotel'}**:`;
 
         list.push({
-          id: "call-status",
+          id: `${prefix}call-status`,
           sender: "ai",
           text: textMsg,
           type: "call_summary",
@@ -221,7 +339,7 @@ export default function ChatPage() {
     if (values.userDecision && values.userDecision !== "pending") {
       const decisionLabel = values.userDecision === "proceed" ? "Confirm and Book" : "Reject Trip"
       list.push({
-        id: "user-dec-msg",
+        id: `${prefix}user-dec-msg`,
         sender: "user",
         text: decisionLabel
       })
@@ -229,14 +347,14 @@ export default function ChatPage() {
       // Booking Success / Rejected cards
       if (values.userDecision === "proceed") {
         list.push({
-          id: "final-booking",
+          id: `${prefix}final-booking`,
           sender: "ai",
           text: `Excellent choice! Your booking is locked. A travel itinerary and check-in confirmation details have been generated.`,
           type: "booking_success"
         })
       } else if (values.userDecision === "reject") {
         list.push({
-          id: "final-booking",
+          id: `${prefix}final-booking`,
           sender: "ai",
           text: `Understood, planning session closed. Let me know if you would like to search a new destination!`,
           type: "booking_rejected"
@@ -261,6 +379,9 @@ export default function ChatPage() {
   async function handleSubmit(text) {
     if (!text.trim() || isTyping) return
 
+    const reqUserId = userIdRef.current;
+    const currentActiveTripId = tripIdRef.current;
+
     setMessage("")
     setIsTyping(true)
 
@@ -282,16 +403,20 @@ export default function ChatPage() {
         },
         body: JSON.stringify({
           rawRequest: text,
-          tripId: tripId || null,
+          tripId: currentActiveTripId || null,
           history: activeHistory
         })
       })
+
+      if (userIdRef.current !== reqUserId) return;
 
       if (!res.ok) {
         throw new Error("Unable to construct travel plan. Please check backend log.")
       }
 
       const result = await res.json()
+      if (userIdRef.current !== reqUserId) return;
+
       if (result.status === "chat" || result.status === "error" || result.error) {
         const aiMsg = {
           id: Date.now() + "-ai",
@@ -301,45 +426,46 @@ export default function ChatPage() {
         // Append response to ongoing thread without clearing previous chat!
         setMessages((prev) => [...prev, aiMsg])
       } else {
-        const oldTripId = tripId
+        const oldTripId = currentActiveTripId
+        const activeTripIdKey = result.tripId || 'current';
         setTripId(result.tripId)
         setTripStatus(result.status)
         setTripData(result.values)
 
-        const tripMessageIds = new Set([
-          "initial-req",
-          "hotel-recs",
-          "selected-hotel-msg",
-          "call-status",
-          "final-booking",
-          "user-dec-msg"
+        const currentTripMsgIds = new Set([
+          `${activeTripIdKey}-initial-req`,
+          `${activeTripIdKey}-hotel-recs`,
+          `${activeTripIdKey}-selected-hotel-msg`,
+          `${activeTripIdKey}-call-status`,
+          `${activeTripIdKey}-final-booking`,
+          `${activeTripIdKey}-user-dec-msg`,
+          "initial-req", "hotel-recs", "selected-hotel-msg", "call-status", "final-booking", "user-dec-msg"
         ]);
 
         setMessages((prev) => {
-          // Freeze previous trip card IDs if tripId changed
-          const frozenPrev = prev.map(m => {
-            if (tripMessageIds.has(m.id)) {
-              return { ...m, id: `${oldTripId || 'old'}-${m.id}` };
-            }
-            return m;
-          });
-          const historyFiltered = frozenPrev.filter(m => m.id !== userMsg.id);
-          const newTripMsgs = reconstructMessages(result.values);
+          const historyFiltered = prev.filter(m => m.id !== userMsg.id && !currentTripMsgIds.has(m.id));
+          const newTripMsgs = reconstructMessages(result.values, activeTripIdKey);
           return [...historyFiltered, userMsg, ...newTripMsgs];
         });
       }
     } catch (err) {
-      showToast(err.message || "Failed to plan trip", "error")
+      if (userIdRef.current === reqUserId) {
+        showToast(err.message || "Failed to plan trip", "error")
+      }
     } finally {
-      setIsTyping(false)
+      if (userIdRef.current === reqUserId) {
+        setIsTyping(false)
+      }
     }
   }
 
   // Handle hotel choice approval and Vapi outbound trigger
   async function handleSelectHotel(hotelId) {
+    const reqUserId = userIdRef.current;
+    const reqTripId = tripIdRef.current;
     setIsTyping(true)
     try {
-      const res = await fetch(`${API_URL}/trips/${tripId}/approve-enquiry`, {
+      const res = await fetch(`${API_URL}/trips/${reqTripId}/approve-enquiry`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -348,40 +474,52 @@ export default function ChatPage() {
         body: JSON.stringify({ hotelId })
       })
 
+      if (userIdRef.current !== reqUserId || tripIdRef.current !== reqTripId) return;
+
       if (!res.ok) {
         throw new Error("Failed to contact selected hotel")
       }
 
       const result = await res.json()
+      if (userIdRef.current !== reqUserId || tripIdRef.current !== reqTripId) return;
+
       setTripStatus(result.status)
       setTripData(result.values)
 
+      const activeTripIdKey = result.tripId || reqTripId || 'current';
       const tripMessageIds = new Set([
-        "initial-req",
-        "hotel-recs",
-        "selected-hotel-msg",
-        "call-status",
-        "final-booking",
-        "user-dec-msg"
+        `${activeTripIdKey}-initial-req`,
+        `${activeTripIdKey}-hotel-recs`,
+        `${activeTripIdKey}-selected-hotel-msg`,
+        `${activeTripIdKey}-call-status`,
+        `${activeTripIdKey}-final-booking`,
+        `${activeTripIdKey}-user-dec-msg`,
+        "initial-req", "hotel-recs", "selected-hotel-msg", "call-status", "final-booking", "user-dec-msg"
       ]);
       setMessages((prev) => {
         const nonTripMsgs = prev.filter(m => !tripMessageIds.has(m.id));
-        const updatedTripMsgs = reconstructMessages(result.values);
+        const updatedTripMsgs = reconstructMessages(result.values, activeTripIdKey);
         return [...nonTripMsgs, ...updatedTripMsgs];
       });
       showToast("Triggering hotel verification call...", "info")
     } catch (err) {
-      showToast(err.message || "Error starting voice call", "error")
+      if (userIdRef.current === reqUserId) {
+        showToast(err.message || "Error starting voice call", "error")
+      }
     } finally {
-      setIsTyping(false)
+      if (userIdRef.current === reqUserId) {
+        setIsTyping(false)
+      }
     }
   }
 
   // Submit final travel status approval/modification
   async function handleDecision(decision, note = "") {
+    const reqUserId = userIdRef.current;
+    const reqTripId = tripIdRef.current;
     setIsTyping(true)
     try {
-      const res = await fetch(`${API_URL}/trips/${tripId}/decision`, {
+      const res = await fetch(`${API_URL}/trips/${reqTripId}/decision`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -390,25 +528,31 @@ export default function ChatPage() {
         body: JSON.stringify({ decision, note })
       })
 
+      if (userIdRef.current !== reqUserId || tripIdRef.current !== reqTripId) return;
+
       if (!res.ok) {
         throw new Error("Failed to submit decision")
       }
 
       const result = await res.json()
+      if (userIdRef.current !== reqUserId || tripIdRef.current !== reqTripId) return;
+
       setTripStatus(result.status)
       setTripData(result.values)
 
+      const activeTripIdKey = result.tripId || reqTripId || 'current';
       const tripMessageIds = new Set([
-        "initial-req",
-        "hotel-recs",
-        "selected-hotel-msg",
-        "call-status",
-        "final-booking",
-        "user-dec-msg"
+        `${activeTripIdKey}-initial-req`,
+        `${activeTripIdKey}-hotel-recs`,
+        `${activeTripIdKey}-selected-hotel-msg`,
+        `${activeTripIdKey}-call-status`,
+        `${activeTripIdKey}-final-booking`,
+        `${activeTripIdKey}-user-dec-msg`,
+        "initial-req", "hotel-recs", "selected-hotel-msg", "call-status", "final-booking", "user-dec-msg"
       ]);
       setMessages((prev) => {
         const nonTripMsgs = prev.filter(m => !tripMessageIds.has(m.id));
-        const updatedTripMsgs = reconstructMessages(result.values);
+        const updatedTripMsgs = reconstructMessages(result.values, activeTripIdKey);
         return [...nonTripMsgs, ...updatedTripMsgs];
       });
 
@@ -420,30 +564,66 @@ export default function ChatPage() {
         showToast("Modifying details...", "info")
       }
     } catch (err) {
-      showToast(err.message || "Error submitting decision", "error")
+      if (userIdRef.current === reqUserId) {
+        showToast(err.message || "Error submitting decision", "error")
+      }
     } finally {
-      setIsTyping(false)
+      if (userIdRef.current === reqUserId) {
+        setIsTyping(false)
+      }
     }
   }
 
   async function handleResetTrip() {
-    // Save current trip messages to history before resetting view
-    if (messages.length > 0) {
-      const currentTripId = tripId || Date.now().toString();
+    const currentUserId = userIdRef.current;
+    const currentTripId = tripIdRef.current;
+
+    // Save current trip messages to user-scoped MongoDB history before resetting view
+    if (messages.length > 0 && currentUserId) {
+      const saveTripId = currentTripId || Date.now().toString();
+      const destinationStr = tripData?.destination || "";
       const entry = {
-        tripId: currentTripId,
+        tripId: saveTripId,
         messages: [...messages],
-        status: tripStatus,
+        status: tripStatus || "idle",
+        destination: destinationStr,
         timestamp: new Date().toISOString()
       };
+
+      if (token) {
+        fetch(`${API_URL}/trips/history`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify(entry)
+        }).catch(err => console.error("Failed to save session to MongoDB history:", err));
+      }
+
       setChatHistory(prev => {
-        if (prev.some(item => item.tripId === currentTripId)) return prev;
-        return [entry, ...prev];
+        const filtered = prev.filter(item => item.tripId !== saveTripId);
+        return [entry, ...filtered];
       });
     }
 
-    // Clear active session from sessionStorage and MongoDB database
-    sessionStorage.removeItem("activeChatSession");
+    // Reset local view state immediately to present a clean landing interface
+    setTripId(null);
+    setTripStatus(null);
+    setTripData(null);
+    setMessages([]);
+    setMessage("");
+
+    // Clear active session from user-scoped sessionStorage
+    if (activeSessionStorageKey) {
+      try {
+        sessionStorage.removeItem(activeSessionStorageKey);
+      } catch {
+        // ignore
+      }
+    }
+
+    // Clear backend DB active trip for this user and wait for completion
     if (token) {
       try {
         await fetch(`${API_URL}/trips/active`, {
@@ -457,12 +637,6 @@ export default function ChatPage() {
       }
     }
 
-    // Reset local view state to present a clean landing interface
-    setTripId(null);
-    setTripStatus(null);
-    setTripData(null);
-    setMessages([]);
-    setMessage("");
     showToast("Reset chat thread. Start planning a new trip!", "info");
   }
 
@@ -477,11 +651,24 @@ export default function ChatPage() {
     };
 
     const deleteHistoryItem = (indexToDelete) => {
+      const itemToDelete = chatHistory[indexToDelete];
+      if (itemToDelete && itemToDelete.tripId && token) {
+        fetch(`${API_URL}/trips/history/${itemToDelete.tripId}`, {
+          method: "DELETE",
+          headers: { "Authorization": `Bearer ${token}` }
+        }).catch(err => console.error("Failed to delete history item from MongoDB:", err));
+      }
       setChatHistory(prev => prev.filter((_, idx) => idx !== indexToDelete));
       showToast("Deleted entry from history", "info");
     };
 
     const clearAllHistory = () => {
+      if (token) {
+        fetch(`${API_URL}/trips/history`, {
+          method: "DELETE",
+          headers: { "Authorization": `Bearer ${token}` }
+        }).catch(err => console.error("Failed to clear history from MongoDB:", err));
+      }
       setChatHistory([]);
       showToast("Cleared all chat history", "info");
     };
@@ -651,7 +838,14 @@ export default function ChatPage() {
                 </div>
 
                 {messages.map((msg) => {
-                  const isHistorical = typeof msg.id === "string" && msg.id.includes("-") && !tripMessageIds.has(msg.id) && !msg.id.endsWith("-user") && !msg.id.endsWith("-ai");
+                  const activePrefix = tripId ? `${tripId}-` : "";
+                  const isCurrentTripMsg = typeof msg.id === "string" && (
+                    (activePrefix && msg.id.startsWith(activePrefix)) ||
+                    tripMessageIds.has(msg.id) ||
+                    msg.id.endsWith("-user") ||
+                    msg.id.endsWith("-ai")
+                  );
+                  const isHistorical = !isCurrentTripMsg;
                   return (
                     <div
                       key={msg.id}
@@ -753,9 +947,10 @@ export default function ChatPage() {
                                         ) : (
                                           <button
                                             onClick={() => handleSelectHotel(hotel.hotelId)}
-                                            className="w-full sm:w-auto bg-sunset text-white py-2 px-5 rounded-lg text-xs font-bold shadow-soft hover:brightness-115 active:scale-95 transition-all duration-200 cursor-pointer text-center"
+                                            className="w-full sm:w-auto bg-sunset text-white py-2 px-5 rounded-lg text-xs font-bold shadow-soft hover:brightness-115 active:scale-95 transition-all duration-200 cursor-pointer text-center flex items-center justify-center gap-1.5"
                                           >
-                                            Select Hotel
+                                            <PhoneCall className="h-3.5 w-3.5" />
+                                            Call Hotel
                                           </button>
                                         )
                                       )}

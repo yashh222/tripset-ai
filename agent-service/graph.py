@@ -9,9 +9,27 @@ from llm_extract import extract_intent, extract_call_summary
 
 
 def parse_intent(state: TripState):
-    if state.get("destination") and state.get("start_date"):
-        return {}
-    return extract_intent(state["raw_request"])
+    raw_req = state.get("raw_request", "")
+    extracted = extract_intent(raw_req)
+    dest = extracted.get("destination") or state.get("destination")
+    
+    return {
+        "destination": dest,
+        "start_date": extracted.get("start_date") or state.get("start_date"),
+        "end_date": extracted.get("end_date") or state.get("end_date"),
+        "duration_days": int(extracted.get("duration_days") or state.get("duration_days") or 4),
+        "travelers": int(extracted.get("travelers") or state.get("travelers") or 2),
+        "budget_inr": float(extracted.get("budget_inr") or state.get("budget_inr") or 25000),
+        "interests": extracted.get("interests", []),
+        "constraints": extracted.get("constraints", []),
+        "ranked_hotels": [],
+        "hotel_candidates": [],
+        "selected_hotel_id": None,
+        "call_status": "idle",
+        "call_summary": None,
+        "user_decision": None,
+        "error": None
+    }
 
 
 import asyncio
@@ -121,10 +139,11 @@ def check_and_update_trip_call_status(trip_id: str, state_values: dict) -> dict:
                     None
                 )
                 hotel_name = selected_hotel.get("name") if selected_hotel else "the hotel"
-
                 summary = extract_call_summary(transcript, hotel_name)
 
-                config = {"configurable": {"thread_id": trip_id}}
+                user_id = state_values.get("user_id")
+                thread_id = f"{user_id}:{trip_id}" if (user_id and not trip_id.startswith(f"{user_id}:")) else trip_id
+                config = {"configurable": {"thread_id": thread_id}}
                 updates = {
                     "call_status": "completed",
                     "call_transcript": transcript,

@@ -1,8 +1,10 @@
+import os
 from typing import Optional, List
 from datetime import datetime
 from langchain_groq import ChatGroq
 
-llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
+DEFAULT_MODEL = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
+llm = ChatGroq(model=DEFAULT_MODEL, temperature=0)
 
 INTENT_SCHEMA = {
     "title": "trip_intent",
@@ -158,7 +160,7 @@ def analyze_user_prompt(raw_request: str, history: Optional[list] = None) -> dic
 def extract_intent(raw_request: str, history: Optional[list] = None) -> dict:
     analysis = analyze_user_prompt(raw_request, history)
     return {
-        "destination": analysis.get("destination", "Goa"),
+        "destination": analysis.get("destination"),
         "start_date": analysis.get("start_date"),
         "end_date": analysis.get("end_date"),
         "duration_days": int(analysis.get("duration_days") or 4),

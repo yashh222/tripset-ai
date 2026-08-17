@@ -90,6 +90,13 @@ export function AuthProvider({ children }) {
 
   function logout() {
     localStorage.removeItem("token")
+    // Clean up generic storage keys to prevent cross-user leakage
+    localStorage.removeItem("chatHistory")
+    try {
+      sessionStorage.clear()
+    } catch {
+      // ignore storage errors
+    }
     setToken(null)
     setUser(null)
   }

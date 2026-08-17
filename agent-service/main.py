@@ -33,6 +33,12 @@ app = FastAPI(
 )
 
 
+def get_thread_id(user_id: Optional[str], trip_id: str) -> str:
+    if user_id and not trip_id.startswith(f"{user_id}:"):
+        return f"{user_id}:{trip_id}"
+    return trip_id
+
+
 # ============================================================
 # Request Models
 # ============================================================
@@ -46,11 +52,13 @@ class CreateTripRequest(BaseModel):
 
 class ApproveEnquiryRequest(BaseModel):
     hotelId: Union[str, int]
+    userId: Optional[str] = None
 
 
 class DecisionRequest(BaseModel):
     decision: str  # "proceed" | "reject" | "modify"
     note: Optional[str] = None
+    userId: Optional[str] = None
 
 
 # ============================================================
@@ -99,11 +107,12 @@ async def create_trip(payload: CreateTripRequest):
 
     # Create unique trip ID or reuse active session tripId
     trip_id = payload.tripId or str(uuid.uuid4())
+    thread_id = get_thread_id(payload.userId, trip_id)
 
     # LangGraph thread configuration
     config = {
         "configurable": {
-            "thread_id": trip_id
+            "thread_id": thread_id
         }
     }
 
@@ -146,10 +155,11 @@ async def create_trip(payload: CreateTripRequest):
 # ============================================================
 
 @app.get("/trips/{trip_id}")
-async def get_trip(trip_id: str):
+async def get_trip(trip_id: str, userId: Optional[str] = None):
+    thread_id = get_thread_id(userId, trip_id)
     config = {
         "configurable": {
-            "thread_id": trip_id
+            "thread_id": thread_id
         }
     }
 
@@ -162,6 +172,12 @@ async def get_trip(trip_id: str):
         )
 
     values = dict(state.values)
+
+    if userId and values.get("user_id") and values.get("user_id") != userId:
+        raise HTTPException(
+            status_code=404,
+            detail="Trip not found",
+        )
 
     values = check_and_update_trip_call_status(
         trip_id,
@@ -179,12 +195,22 @@ async def get_trip(trip_id: str):
 async def approve_enquiry(
     trip_id: str,
     payload: ApproveEnquiryRequest,
+    userId: Optional[str] = None,
 ):
+    effective_userId = payload.userId or userId
+    thread_id = get_thread_id(effective_userId, trip_id)
     config = {
         "configurable": {
-            "thread_id": trip_id
+            "thread_id": thread_id
         }
     }
+
+    state = trip_graph.get_state(config)
+    if effective_userId and state.values and state.values.get("user_id") and state.values.get("user_id") != effective_userId:
+        raise HTTPException(
+            status_code=404,
+            detail="Trip not found",
+        )
 
     result = await trip_graph.ainvoke(
         Command(
@@ -207,12 +233,22 @@ async def approve_enquiry(
 async def submit_decision(
     trip_id: str,
     payload: DecisionRequest,
+    userId: Optional[str] = None,
 ):
+    effective_userId = payload.userId or userId
+    thread_id = get_thread_id(effective_userId, trip_id)
     config = {
         "configurable": {
-            "thread_id": trip_id
+            "thread_id": thread_id
         }
     }
+
+    state = trip_graph.get_state(config)
+    if effective_userId and state.values and state.values.get("user_id") and state.values.get("user_id") != effective_userId:
+        raise HTTPException(
+            status_code=404,
+            detail="Trip not found",
+        )
 
     # Validate decision
     if payload.decision not in ["proceed", "reject", "modify"]:

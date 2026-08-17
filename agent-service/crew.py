@@ -9,8 +9,13 @@ os.environ["CREWAI_TRACING_ENABLED"] = "false"
 from crewai import Agent, Task, Crew, Process, LLM
 from tools import hotel_search_tool, maps_tool, activities_tool
 
+DEFAULT_MODEL = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
+# CrewAI strips the initial "openai/" provider prefix when making requests to custom base_url.
+# Prefixing with "openai/" ensures the target provider model string (e.g. "openai/gpt-oss-120b") is passed to Groq.
+llm_model_name = f"openai/{DEFAULT_MODEL}" if not DEFAULT_MODEL.startswith("openai/openai/") else DEFAULT_MODEL
+
 llm = LLM(
-    model="openai/llama-3.1-8b-instant",
+    model=llm_model_name,
     base_url="https://api.groq.com/openai/v1",
     api_key=os.environ.get("GROQ_API_KEY"),
     temperature=0
